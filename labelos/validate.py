@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 import struct
-from io import BytesIO
 from collections.abc import Callable
+from io import BytesIO
 
 from .models import LabelSpec, Report
 
