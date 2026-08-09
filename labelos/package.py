@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import LabelSpec, Report
@@ -25,7 +25,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     manifest = {
         "schema_version": 1,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "artwork": {
             "file": artwork_destination.name,
             "sha256": _sha256(artwork_destination),
