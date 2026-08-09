@@ -158,8 +158,8 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         return
     report.checks.append("code-decode")
     try:
-        from PIL import Image
         import zxingcpp
+        from PIL import Image
     except ImportError:
         report.add(
             "DECODER_UNAVAILABLE",
