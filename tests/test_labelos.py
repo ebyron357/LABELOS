@@ -1,7 +1,10 @@
 import json
+from base64 import b64encode
+from io import BytesIO
 from pathlib import Path
 
 import barcode
+import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
 
@@ -114,5 +117,51 @@ def test_barcode_expected_value_is_decoded(tmp_path):
         tmp_path,
     )
     report = validate(spec)
+    assert report.passed
+    assert report.metadata["decoded_values"] == [value]
+
+
+def test_qr_expected_value_is_decoded_from_svg(tmp_path):
+    value = "https://example.test/svg-qr"
+    qr = qrcode.make(value)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    artwork = tmp_path / "qr.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20">'
+            f'<image href="data:image/png;base64,{b64encode(buffer.getvalue()).decode()}" '
+            'width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "qr_value": value}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["decoded_values"] == [value]
+
+
+def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
+    value = "LABELOS-PDF-12345"
+    barcode_path = Path(
+        barcode.get("code128", value, writer=ImageWriter()).save(str(tmp_path / "barcode"))
+    )
+    artwork = tmp_path / "barcode.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=100 / (25.4 / 72), height=100 / (25.4 / 72))
+    page.insert_image(pymupdf.Rect(25, 50, 250, 150), filename=barcode_path)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "barcode_value": value}, tmp_path
+    )
+
+    report = validate(spec)
+
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
