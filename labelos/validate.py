@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import re
 import struct
-from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from .models import LabelSpec, Report
 
@@ -89,7 +88,7 @@ def _validate_pixel_dimensions(
 
 def _validate_svg(spec: LabelSpec, report: Report) -> str:
     text = spec.artwork.read_text(encoding="utf-8", errors="replace")
-    match = re.search(r"<svg\b[^>]*>", text, re.I)
+    match = re.search(r"<svg\b[^>]*>", text, re.IGNORECASE)
     if not match:
         report.add("SVG_INVALID", "error", "No SVG root element found")
         return text
@@ -104,7 +103,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
 
 
 def _svg_mm(root: str, attr: str) -> float | None:
-    match = re.search(fr'\b{attr}=["\']\s*([0-9.]+)\s*(mm|cm|in|pt)["\']', root, re.I)
+    match = re.search(fr'\b{attr}=["\']\s*([0-9.]+)\s*(mm|cm|in|pt)["\']', root, re.IGNORECASE)
     if not match:
         return None
     value, unit = float(match.group(1)), match.group(2).lower()
@@ -165,7 +164,7 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         return
     try:
         results = zxingcpp.read_barcodes(str(spec.artwork))
-    except Exception as error:
+    except (OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
         return
     decoded = {result.text for result in results}

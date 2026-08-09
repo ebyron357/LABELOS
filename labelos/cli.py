@@ -20,7 +20,7 @@ def _load_spec(path: Path) -> LabelSpec:
     except json.JSONDecodeError as error:
         raise ValueError(f"Configuration is not valid JSON: {error}") from None
     if not isinstance(data, dict):
-        raise ValueError("Configuration root must be a JSON object")
+        raise TypeError("Configuration root must be a JSON object")
     return LabelSpec.from_dict(data, path.parent)
 
 
@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             report.metadata["manifest"] = str(manifest)
         _print_report(report.to_dict(), args.json)
         return 0 if report.passed else 1
-    except (ValueError, FileExistsError) as error:
+    except (ValueError, TypeError, FileExistsError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
