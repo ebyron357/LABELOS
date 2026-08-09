@@ -5,8 +5,9 @@
 - JSON label specification validation with physical dimensions, bleed, safe-area sanity,
   minimum DPI, and required-copy fields.
 - SVG, PNG, and PDF artwork validation through bundled PyMuPDF.
-- QR/barcode expected-value validation through bundled ZXing-C++; a decoder load failure is a
-  validation error whenever code validation is requested.
+- QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
+  rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
+  whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
   and SHA-256 checksums.
@@ -28,7 +29,7 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `47c7241901830cee0c9b26ef275432fcfd58bed5`:
+Verified on 2026-08-09 from commit `7f259b8a37c5ac117e8c895b1b39ea63c311b503`:
 
 ```text
 python3 -m pytest                         # 7 passed
@@ -40,7 +41,8 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 7 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
+Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
 end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
-QR and Code 128 regression tests generate fixtures and verify their decoded expected values.
+QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
+decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
