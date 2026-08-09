@@ -29,7 +29,7 @@
 
 ## Verification record
 
-Verified on 2026-08-09 on branch `cursor/pr-readiness-fixes-f855`:
+Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
 
 ```text
 python3 -m pytest                         # 9 passed
