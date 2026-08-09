@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
+import barcode
 import qrcode
+from barcode.writer import ImageWriter
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -94,3 +96,23 @@ def test_qr_expected_value_is_decoded(tmp_path):
     report = validate(spec)
     assert report.passed
     assert report.metadata["decoded_values"] == ["https://example.test/sku/42"]
+
+
+def test_barcode_expected_value_is_decoded(tmp_path):
+    value = "LABELOS-12345"
+    artwork = Path(
+        barcode.get("code128", value, writer=ImageWriter()).save(str(tmp_path / "barcode"))
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 100,
+            "min_dpi": 1,
+            "barcode_value": value,
+        },
+        tmp_path,
+    )
+    report = validate(spec)
+    assert report.passed
+    assert report.metadata["decoded_values"] == [value]

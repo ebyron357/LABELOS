@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+  "python-barcode>=0.16.1",
   "pytest>=9.1.1",
   "qrcode>=8.2",
 ]
