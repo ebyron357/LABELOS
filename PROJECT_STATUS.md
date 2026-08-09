@@ -28,7 +28,7 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `ebc83b73ea5a8d3edab39bb72a51985881fc9bd2`:
+Verified on 2026-08-09 from commit `47c7241901830cee0c9b26ef275432fcfd58bed5`:
 
 ```text
 python3 -m pytest                         # 7 passed
@@ -40,6 +40,7 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-The end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 7 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
+end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate fixtures and verify their decoded expected values.
