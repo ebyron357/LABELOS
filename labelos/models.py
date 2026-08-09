@@ -53,7 +53,7 @@ class LabelSpec:
     qr_value: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], root: Path) -> "LabelSpec":
+    def from_dict(cls, data: dict[str, Any], root: Path) -> LabelSpec:
         required = ("artwork", "width_mm", "height_mm")
         absent = [key for key in required if key not in data]
         if absent:

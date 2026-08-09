@@ -6,7 +6,6 @@ from labelos.models import LabelSpec
 from labelos.package import create_package, verify_package
 from labelos.validate import validate
 
-
 ROOT = Path(__file__).parent.parent
 
 
