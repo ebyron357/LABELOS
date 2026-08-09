@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import qrcode
+
 from labelos.cli import main
 from labelos.models import LabelSpec
 from labelos.package import create_package, verify_package
@@ -73,3 +75,22 @@ def test_cli_validate_and_package(tmp_path, capsys):
     package = tmp_path / "release"
     assert main(["package", str(config), str(package)]) == 0
     assert main(["verify-package", str(package)]) == 0
+
+
+def test_qr_expected_value_is_decoded(tmp_path):
+    image = qrcode.make("https://example.test/sku/42")
+    artwork = tmp_path / "qr.png"
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 20,
+            "height_mm": 20,
+            "min_dpi": 1,
+            "qr_value": "https://example.test/sku/42",
+        },
+        tmp_path,
+    )
+    report = validate(spec)
+    assert report.passed
+    assert report.metadata["decoded_values"] == ["https://example.test/sku/42"]
