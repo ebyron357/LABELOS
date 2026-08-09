@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import struct
+from io import BytesIO
 from collections.abc import Callable
 
 from .models import LabelSpec, Report
@@ -168,9 +169,9 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         )
         return
     try:
-        with Image.open(spec.artwork) as image:
+        with _code_image(spec.artwork, Image) as image:
             results = zxingcpp.read_barcodes(image)
-    except (OSError, RuntimeError, ValueError) as error:
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
         return
     decoded = {result.text for result in results}
@@ -178,3 +179,21 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     for kind, expected in expectations:
         if expected and expected not in decoded:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
+
+
+def _code_image(artwork, image_module):
+    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+
+    if artwork.suffix.lower() == ".png":
+        return image_module.open(artwork)
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        page = document[0]
+        pixmap = page.get_pixmap(dpi=300, alpha=False)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
