@@ -1,0 +1,76 @@
+import json
+from pathlib import Path
+
+from labelos.cli import main
+from labelos.models import LabelSpec
+from labelos.package import create_package, verify_package
+from labelos.validate import validate
+
+
+ROOT = Path(__file__).parent.parent
+
+
+def passing_spec() -> LabelSpec:
+    return LabelSpec.from_dict(
+        {
+            "artwork": "fixtures/passing-label.svg",
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "required_copy": ["Example Product", "NET 250 g"],
+        },
+        ROOT,
+    )
+
+
+def test_passing_svg_validates():
+    report = validate(passing_spec())
+    assert report.passed
+    assert report.metadata["artwork_size_mm"] == {"width": 106.0, "height": 56.0}
+
+
+def test_missing_copy_fails():
+    spec = LabelSpec.from_dict(
+        {"artwork": "fixtures/passing-label.svg", "width_mm": 106, "height_mm": 56, "required_copy": ["Absent"]},
+        ROOT,
+    )
+    report = validate(spec)
+    assert not report.passed
+    assert report.issues[0].code == "REQUIRED_COPY_MISSING"
+
+
+def test_dimension_mismatch_fails():
+    spec = LabelSpec.from_dict(
+        {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
+    )
+    assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def test_package_contains_verified_manifest(tmp_path):
+    spec = passing_spec()
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+    assert manifest.is_file()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
+    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+
+
+def test_cli_validate_and_package(tmp_path, capsys):
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps(
+            {
+                "artwork": str(ROOT / "fixtures/passing-label.svg"),
+                "width_mm": 106,
+                "height_mm": 56,
+                "required_copy": ["Example Product"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["validate", str(config), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["passed"]
+    package = tmp_path / "release"
+    assert main(["package", str(config), str(package)]) == 0
+    assert main(["verify-package", str(package)]) == 0
