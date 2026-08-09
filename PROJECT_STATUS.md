@@ -46,4 +46,4 @@ python3 -m labelos.cli doctor     # ZXing-C++ and PyMuPDF available; Callas bloc
 
 The test suite exercises decodable Code 128 and QR fixtures, passing and failing
 validation paths, PDF verification, package manifests/checksums, and CLI exit codes.
-The commit SHA is recorded after the verified changes are committed.
+Verified implementation commit: `ee82040` (`feat: add label production validation system`).
