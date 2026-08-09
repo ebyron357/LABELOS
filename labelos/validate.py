@@ -112,11 +112,11 @@ def _svg_mm(root: str, attr: str) -> float | None:
 
 def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     try:
-        import fitz  # PyMuPDF
+        import pymupdf
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = fitz.open(spec.artwork)
+    document = pymupdf.open(spec.artwork)
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")

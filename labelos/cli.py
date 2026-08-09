@@ -35,7 +35,7 @@ def _print_report(report: dict, as_json: bool) -> None:
 
 def _doctor() -> dict:
     tools = {}
-    for name, module in (("PyMuPDF", "fitz"), ("ZXing-C++", "zxingcpp"), ("Callas pdfToolbox", None)):
+    for name, module in (("PyMuPDF", "pymupdf"), ("ZXing-C++", "zxingcpp"), ("Callas pdfToolbox", None)):
         if module is None:
             tools[name] = {"available": False, "status": "optional commercial adapter not configured"}
             continue
