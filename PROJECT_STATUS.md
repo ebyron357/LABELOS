@@ -29,7 +29,7 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `7f259b8a37c5ac117e8c895b1b39ea63c311b503`:
+Verified on 2026-08-09 from commit `7f259b84de48c64336d07a3a94a08f382d940da9`:
 
 ```text
 python3 -m pytest                         # 7 passed
