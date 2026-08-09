@@ -158,12 +158,18 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         return
     report.checks.append("code-decode")
     try:
+        from PIL import Image
         import zxingcpp
     except ImportError:
-        report.add("DECODER_UNAVAILABLE", "error", "Install zxing-cpp to validate barcode or QR values")
+        report.add(
+            "DECODER_UNAVAILABLE",
+            "error",
+            "Install Pillow and zxing-cpp to validate barcode or QR values",
+        )
         return
     try:
-        results = zxingcpp.read_barcodes(str(spec.artwork))
+        with Image.open(spec.artwork) as image:
+            results = zxingcpp.read_barcodes(image)
     except (OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
         return
