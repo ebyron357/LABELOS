@@ -833,7 +833,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  message: $('Finalize Validated Report').first().json.reportCommitMessage,\n  branch: $('Finalize Validated Report').first().json.auditBranch,\n  content: Buffer.from($('Finalize Validated Report').first().json.report, 'utf8').toString('base64')\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  message: 'docs(audit): production readiness audit report',\n  branch: $('Finalize Validated Report').first().json.auditBranch,\n  content: Buffer.from($('Finalize Validated Report').first().json.report, 'utf8').toString('base64')\n}) }}",
         "options": {
           "response": {
             "response": {
@@ -931,7 +931,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  title: $json.pullRequestTitle,\n  head: $json.auditBranch,\n  base: $json.effectiveBranch,\n  body: $json.pullRequestBody\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  title: 'docs(audit): production readiness audit report',\n  head: $json.auditBranch,\n  base: $json.effectiveBranch,\n  body: 'Automated production-readiness audit and remediation plan.\\nNo application remediation was applied.'\n}) }}",
         "options": {
           "response": {
             "response": {
