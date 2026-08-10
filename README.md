@@ -36,6 +36,11 @@ LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_v
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
 code was checked.
 
+When `safe_area_mm` is nonzero, LABELOS validates text, images, and inspectable vector
+elements against the safe rectangle inside the trim edge. SVG transforms and unsupported SVG
+geometry fail closed rather than being silently skipped. PNG labels use their non-white,
+non-transparent content bounds; PDF labels use text, image, and vector-drawing bounds.
+
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
