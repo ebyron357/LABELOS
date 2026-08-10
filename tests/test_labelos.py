@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -52,14 +53,48 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_returns_a_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[0].code == "PDF_INVALID"
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
+    assert (manifest.parent / "label-spec.json").is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_tampered_report_and_unsafe_manifest_paths(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    report = package / "validation-report.json"
+    report.write_text(json.dumps({"passed": False, "metadata": {"spec": {}}}), encoding="utf-8")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["validation_report"]["sha256"] = hashlib.sha256(report.read_bytes()).hexdigest()
+    manifest_data["validation_report"]["bytes"] = report.stat().st_size
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+    assert verify_package(package) == [
+        "validation report does not record a passing validation",
+        "validation report spec does not match label spec",
+    ]
+
+    manifest_data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+    assert verify_package(package) == ["artwork file must be a package-local filename"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
