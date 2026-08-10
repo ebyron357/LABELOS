@@ -31,7 +31,7 @@
 
 ## Verification record
 
-Verified on 2026-08-10 for delivery commit `0cf1650f25d301714a6834a5225952584246101b`:
+Verified on 2026-08-10 for delivery commit `0cf1650c90b72c6cccaa8e292bd592db9bce90ea`:
 
 ```text
 python3 -m pytest                         # 10 passed
