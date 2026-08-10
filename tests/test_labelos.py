@@ -52,14 +52,71 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_is_reported_without_a_traceback(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    package_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert package_spec["artwork"] == "passing-label.svg"
+    assert package_spec["required_copy"] == ["Example Product", "NET 250 g"]
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_invalid_metadata_and_report(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+
+    data["artwork"]["file"] = "../passing-label.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(package) == ["artwork file name is invalid"]
+
+    data["artwork"]["file"] = "passing-label.svg"
+    data["artwork"]["sha256"] = "A" * 64
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(package) == ["artwork checksum is invalid"]
+
+    data["artwork"]["sha256"] = _sha256(package / "passing-label.svg")
+    data["validation_report"]["passed"] = False
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(package) == ["manifest does not record a passing validation report"]
+
+
+def test_package_verification_rejects_report_and_spec_disagreements(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    report_path = package / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    _refresh_manifest_file_entry(manifest, "validation_report")
+    assert verify_package(package) == ["validation_report does not record a passing validation"]
+
+    report["passed"] = True
+    report["metadata"]["spec"]["width_mm"] = 999
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    _refresh_manifest_file_entry(manifest, "validation_report")
+    assert verify_package(package) == ["validation_report spec does not match manifest spec"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -119,6 +176,20 @@ def test_barcode_expected_value_is_decoded(tmp_path):
     report = validate(spec)
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def _refresh_manifest_file_entry(manifest: Path, key: str) -> None:
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    file_path = manifest.parent / data[key]["file"]
+    data[key]["sha256"] = _sha256(file_path)
+    data[key]["bytes"] = file_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_qr_expected_value_is_decoded_from_svg(tmp_path):
