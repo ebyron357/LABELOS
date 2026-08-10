@@ -51,6 +51,13 @@ non-transparent content bounds; PDF labels use text, image, and vector-drawing b
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
+## Regression fixtures
+
+`examples/fixture-pass.json` is a passing operator configuration. The three
+`examples/fixture-fail-*.json` configurations intentionally fail safe-area, physical-dimension,
+and required-copy checks. They use committed artwork in `fixtures/` and are exercised both by
+the test suite and CI, so they provide a stable template for adding approved SKU configurations.
+
 ## Current scope and limitations
 
 The core validator provides reproducible local checks and package integrity. Commercial
