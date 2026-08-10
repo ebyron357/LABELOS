@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -58,8 +59,42 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    package_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert package_spec["schema_version"] == 1
+    assert package_spec["artwork"] == "passing-label.svg"
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+
+
+def test_package_verification_rejects_untrusted_manifest_entries(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest["label_spec"]["sha256"] = "NOT-A-DIGEST"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = verify_package(manifest_path.parent)
+
+    assert "artwork file must be a package-local filename" in failures
+    assert "label_spec checksum is not a lowercase SHA-256 digest: label-spec.json" in failures
+
+
+def test_package_verification_requires_passing_report(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    report_path = manifest_path.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "validation report does not record a passing validation" in verify_package(manifest_path.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -80,6 +115,19 @@ def test_cli_validate_and_package(tmp_path, capsys):
     package = tmp_path / "release"
     assert main(["package", str(config), str(package)]) == 0
     assert main(["verify-package", str(package)]) == 0
+
+
+def test_invalid_pdf_reports_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[0].code == "PDF_INVALID"
 
 
 def test_qr_expected_value_is_decoded(tmp_path):
