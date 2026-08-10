@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -58,8 +59,45 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    packaged_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert packaged_spec["artwork"] == "passing-label.svg"
+    assert packaged_spec["width_mm"] == 100
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+
+
+def test_package_verification_rejects_malformed_and_unsafe_manifest_entries(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(manifest.parent) == ["artwork manifest filename is unsafe"]
+
+    data["artwork"]["file"] = "passing-label.svg"
+    data["label_spec"]["bytes"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(manifest.parent) == ["label_spec manifest byte count is invalid"]
+
+
+def test_package_verification_rejects_unknown_schema_and_non_passing_report(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 2
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(manifest.parent) == ["unsupported manifest schema version"]
+
+    data["schema_version"] = 1
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(manifest.parent) == ["validation_report does not record a passing validation"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
