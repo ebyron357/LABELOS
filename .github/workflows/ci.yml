@@ -26,3 +26,9 @@ jobs:
       - run: python -m pytest
       - run: python -m ruff check .
       - run: python -m build
+      - name: Verify committed operator fixtures
+        run: |
+          python -m labelos.cli validate examples/fixture-pass.json --json
+          ! python -m labelos.cli validate examples/fixture-fail-safe-area.json --json
+          ! python -m labelos.cli validate examples/fixture-fail-dimensions.json --json
+          ! python -m labelos.cli validate examples/fixture-fail-missing-copy.json --json

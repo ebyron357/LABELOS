@@ -1,0 +1,7 @@
+{
+  "artwork": "../fixtures/failing-safe-area.svg",
+  "width_mm": 100,
+  "height_mm": 50,
+  "bleed_mm": 3,
+  "safe_area_mm": 2
+}

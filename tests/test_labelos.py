@@ -192,6 +192,24 @@ def test_example_safe_area_is_enforced():
     assert "safe-area" in report.checks
 
 
+def test_committed_fixture_configs_cover_passing_and_failing_artwork():
+    expected_issues = {
+        "fixture-pass.json": None,
+        "fixture-fail-safe-area.json": "SAFE_AREA_VIOLATION",
+        "fixture-fail-dimensions.json": "DIMENSIONS_MISMATCH",
+        "fixture-fail-missing-copy.json": "REQUIRED_COPY_MISSING",
+    }
+    for filename, expected_issue in expected_issues.items():
+        data = json.loads((ROOT / "examples" / filename).read_text(encoding="utf-8"))
+        report = validate(LabelSpec.from_dict(data, ROOT / "examples"))
+
+        if expected_issue is None:
+            assert report.passed, filename
+        else:
+            assert not report.passed, filename
+            assert any(issue.code == expected_issue for issue in report.issues), filename
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
