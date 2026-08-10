@@ -5,10 +5,12 @@ from __future__ import annotations
 import re
 import struct
 from collections.abc import Callable
+from pathlib import Path
 
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+CODE_RENDER_DPI = 300
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -159,18 +161,17 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     report.checks.append("code-decode")
     try:
         import zxingcpp
-        from PIL import Image
     except ImportError:
         report.add(
             "DECODER_UNAVAILABLE",
             "error",
-            "Install Pillow and zxing-cpp to validate barcode or QR values",
+            "Install zxing-cpp to validate barcode or QR values",
         )
         return
     try:
-        with Image.open(spec.artwork) as image:
+        with _code_image(spec.artwork) as image:
             results = zxingcpp.read_barcodes(image)
-    except (OSError, RuntimeError, ValueError) as error:
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
         return
     decoded = {result.text for result in results}
@@ -178,3 +179,21 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     for kind, expected in expectations:
         if expected and expected not in decoded:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
+
+
+def _code_image(artwork: Path):
+    """Return a Pillow image, rasterizing vector artwork at a stable inspection resolution."""
+    from PIL import Image
+
+    if artwork.suffix.lower() == ".png":
+        return Image.open(artwork)
+    try:
+        import pymupdf
+    except ImportError as error:
+        raise ImportError("Install PyMuPDF to decode codes from SVG or PDF artwork") from error
+    with pymupdf.open(artwork) as document:
+        if document.page_count != 1:
+            raise ValueError(f"Artwork must contain one page, found {document.page_count}")
+        page = document[0]
+        pixels = page.get_pixmap(dpi=CODE_RENDER_DPI, alpha=False)
+        return Image.frombytes("RGB", (pixels.width, pixels.height), pixels.samples)
