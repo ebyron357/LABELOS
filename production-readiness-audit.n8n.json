@@ -1,0 +1,1393 @@
+{
+  "name": "Production Readiness Audit",
+  "nodes": [
+    {
+      "id": "c9685ed4-72ac-4f42-b6fd-11c6003cdb9a",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "e58708df-3d06-4bf2-a25a-885be7007ccc",
+      "name": "Runtime Inputs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "keepOnlySet": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4cb68637-4bd7-4f11-a623-5487be304206",
+              "name": "owner",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "0be82344-b7b8-4bd0-bee7-dc5ad9907e9e",
+              "name": "repo",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "7f6aeedf-041e-47ca-847d-6a93c39e3536",
+              "name": "branch",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "047543aa-bfab-4dea-9251-c71c9aa1fc7d",
+              "name": "auditBranch",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "8d6a1965-c24f-404c-ba46-107222961484",
+              "name": "writeReport",
+              "type": "boolean",
+              "value": true
+            },
+            {
+              "id": "75cf5203-ecfb-4484-b041-ebca43e7b8af",
+              "name": "openPr",
+              "type": "boolean",
+              "value": false
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1b431a0-1fa3-479f-b4ef-3653ccff9e9e",
+      "name": "Validate And Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = { ...$json };\nconst requireText = (name) => {\n  const value = typeof input[name] === 'string' ? input[name].trim() : '';\n  if (!value) {\n    throw new Error(`Missing required runtime input: ${name}`);\n  }\n  return value;\n};\nconst owner = requireText('owner');\nconst repo = requireText('repo');\nconst optional = (name) => typeof input[name] === 'string' ? input[name].trim() : '';\nconst branch = optional('branch');\nconst auditBranchInput = optional('auditBranch');\nconst booleanish = (value, fallback) => {\n  if (typeof value === 'boolean') return value;\n  if (typeof value === 'string') {\n    const normalized = value.trim().toLowerCase();\n    if (['true', '1', 'yes', 'y'].includes(normalized)) return true;\n    if (['false', '0', 'no', 'n'].includes(normalized)) return false;\n  }\n  if (typeof value === 'number') return value !== 0;\n  return fallback;\n};\nconst ownerPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?$/;\nconst repoPattern = /^(?!\\.)(?!.*\\.\\.)(?!.*\\/$)[A-Za-z0-9._-]{1,100}$/;\nconst branchPattern = /^(?!\\/|.*\\.lock$)(?!.*\\.\\.)[A-Za-z0-9._\\/-]{1,255}$/;\nif (!ownerPattern.test(owner)) {\n  throw new Error(`Invalid owner value: ${owner}`);\n}\nif (!repoPattern.test(repo)) {\n  throw new Error(`Invalid repo value: ${repo}`);\n}\nif (branch && !branchPattern.test(branch)) {\n  throw new Error(`Invalid branch value: ${branch}`);\n}\nif (auditBranchInput && !branchPattern.test(auditBranchInput)) {\n  throw new Error(`Invalid auditBranch value: ${auditBranchInput}`);\n}\nconst now = new Date();\nconst pad = (value) => String(value).padStart(2, '0');\nconst timestamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;\nconst auditBranch = auditBranchInput || `audit/production-readiness-${timestamp}`;\nreturn {\n  json: {\n    owner,\n    repo,\n    branch,\n    auditBranch,\n    writeReport: booleanish(input.writeReport, true),\n    openPr: booleanish(input.openPr, false),\n    enforceReadOnlyAgent: true,\n    auditReportPath: 'AUDIT_REPORT.md',\n    reportCommitMessage: 'docs(audit): production readiness audit report',\n    pullRequestTitle: 'docs(audit): production readiness audit report',\n    pullRequestBody: 'Automated production-readiness audit and remediation plan.\\nNo application remediation was applied.',\n    generatedAt: now.toISOString(),\n  },\n};"
+      }
+    },
+    {
+      "id": "be963d10-3bf3-4c4e-ab3a-1ee5671f3852",
+      "name": "Fetch Repository Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "c420dbf0-9482-42a8-899c-57ac8dab5228",
+      "name": "Resolve Effective Branch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const runtime = $('Validate And Normalize').first().json;\nconst repo = $json;\nconst effectiveBranch = runtime.branch || repo.default_branch;\nif (!effectiveBranch) {\n  throw new Error('Unable to resolve repository default_branch.');\n}\nreturn {\n  json: {\n    ...runtime,\n    repository: repo,\n    effectiveBranch,\n  },\n};"
+      }
+    },
+    {
+      "id": "c21bea2a-44da-4082-98cc-c19347fe946c",
+      "name": "Fetch Effective Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo + \"/branches/\" + encodeURIComponent($(\"Resolve Effective Branch\").first().json.effectiveBranch) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "62e88ba2-b6e6-42b4-b53e-ba5254559cb4",
+      "name": "Resolve Baseline SHA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const branch = $json;\nconst effective = $('Resolve Effective Branch').first().json;\nconst baselineSha = branch?.commit?.sha;\nif (!baselineSha) {\n  throw new Error('Unable to resolve branch commit SHA.');\n}\nreturn {\n  json: {\n    ...effective,\n    baselineSha,\n    branchMetadata: branch,\n  },\n};"
+      }
+    },
+    {
+      "id": "ab57a19e-0232-42da-b158-a6643372aad5",
+      "name": "Fetch Recursive Tree",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo + \"/git/trees/\" + $(\"Resolve Baseline SHA\").first().json.baselineSha }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "recursive",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "783d91e6-c14b-40e5-bae6-9528bf94f635",
+      "name": "Validate Tree Coverage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const treeResponse = $json;\nconst context = $('Resolve Baseline SHA').first().json;\nif (treeResponse.truncated === true) {\n  throw new Error('Git tree response was truncated. Coverage is incomplete; rerun with subtree retrieval support before claiming a complete audit.');\n}\nif (!Array.isArray(treeResponse.tree)) {\n  throw new Error('Git tree response did not contain a tree array.');\n}\nreturn {\n  json: {\n    ...context,\n    treeResponse,\n  },\n};"
+      }
+    },
+    {
+      "id": "ef0aecd7-0d38-47a8-b913-3b4418bd86b2",
+      "name": "Build Inventory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2380,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const context = $json;\nconst entries = context.treeResponse.tree;\nconst includePrefixes = [\n  'app/', 'src/', 'pages/', 'components/', 'lib/', 'api/', 'server/', 'styles/', 'public/',\n  'database/', 'prisma/', 'migrations/', 'tests/', '.github/workflows/'\n];\nconst includeNames = new Set([\n  'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb',\n  'pyproject.toml', 'poetry.lock', 'requirements.txt', 'requirements-dev.txt', 'Pipfile',\n  'Pipfile.lock', 'Dockerfile', 'docker-compose.yml', 'docker-compose.yaml',\n  'vercel.json', 'netlify.toml', 'wrangler.toml', 'next.config.js', 'next.config.mjs',\n  'next.config.ts', 'nuxt.config.ts', 'vite.config.ts', 'vite.config.js', 'astro.config.mjs',\n  'tsconfig.json', 'README.md', 'README', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md',\n  '.nvmrc', '.node-version', '.tool-versions', '.env.example', '.env.sample', '.env.template'\n]);\nconst excludeSegments = [\n  '.git/', 'node_modules/', '.pnpm-store/', '.yarn/', '.next/', '.nuxt/', '.output/', 'dist/', 'build/',\n  'coverage/', '.cache/', '.turbo/', '.vercel/', '.svelte-kit/', '.parcel-cache/', '__pycache__/',\n  '.pytest_cache/', '.mypy_cache/', '.ruff_cache/', '.tox/', '.venv/', 'venv/', '.idea/', '.vscode/',\n  'vendor/', 'target/', 'bin/', 'obj/', 'DerivedData/', '.gradle/', '.terraform/'\n];\nconst secretPatterns = [\n  /(^|\\/)\\.env(\\.|$)/i,\n  /(^|\\/).*secret/i,\n  /(^|\\/).*credential/i,\n  /(^|\\/).*id_rsa/i,\n  /(^|\\/)\\.npmrc$/i,\n  /(^|\\/)\\.pypirc$/i,\n  /(^|\\/)\\.netrc$/i,\n];\nconst binaryExtensions = new Set([\n  'png','jpg','jpeg','gif','webp','ico','pdf','zip','gz','tgz','bz2','xz','7z','jar','war','ear','exe','dll','so','dylib','mp4','mov','avi','woff','woff2','ttf','otf','eot','mp3','wav','ogg','psd','ai','sketch','fig'\n]);\nconst isEligiblePath = (path) => {\n  if (!path || typeof path !== 'string') return false;\n  if (excludeSegments.some((segment) => path.includes(segment))) return false;\n  if (secretPatterns.some((pattern) => pattern.test(path))) return false;\n  const lower = path.toLowerCase();\n  const extension = lower.includes('.') ? lower.split('.').pop() : '';\n  if (binaryExtensions.has(extension)) return false;\n  if (includeNames.has(path)) return true;\n  if (includePrefixes.some((prefix) => path.startsWith(prefix))) return true;\n  if (/(^|\\/)readme/i.test(path) || /(^|\\/)security\\.md$/i.test(path) || /(^|\\/)contributing\\.md$/i.test(path)) return true;\n  return false;\n};\nconst eligibleFiles = entries\n  .filter((entry) => entry.type === 'blob' && isEligiblePath(entry.path))\n  .map((entry, index) => ({\n    path: entry.path,\n    sha: entry.sha,\n    size: entry.size || 0,\n    url: entry.url,\n    index,\n    extension: entry.path.includes('.') ? entry.path.split('.').pop().toLowerCase() : '',\n    chunkIndex: Math.floor(index / 20),\n  }));\nconst topLevel = [...new Set(entries.map((entry) => entry.path.split('/')[0]).filter(Boolean))].sort();\nconst manifests = eligibleFiles.map((file) => file.path).filter((path) => /(package\\.json|pnpm-lock\\.yaml|yarn\\.lock|package-lock\\.json|pyproject\\.toml|requirements.*\\.txt|Dockerfile|docker-compose|vercel\\.json|netlify\\.toml|wrangler\\.toml|tsconfig\\.json|next\\.config|vite\\.config|astro\\.config|nuxt\\.config)/i.test(path));\nconst stack = [];\nif (entries.some((entry) => entry.path === 'package.json')) stack.push('node');\nif (entries.some((entry) => entry.path === 'pyproject.toml' || entry.path === 'requirements.txt')) stack.push('python');\nif (entries.some((entry) => entry.path === 'Dockerfile')) stack.push('docker');\nif (entries.some((entry) => entry.path === 'prisma/schema.prisma')) stack.push('prisma');\nconst packageManagers = [];\nif (entries.some((entry) => entry.path === 'pnpm-lock.yaml')) packageManagers.push('pnpm');\nif (entries.some((entry) => entry.path === 'yarn.lock')) packageManagers.push('yarn');\nif (entries.some((entry) => entry.path === 'package-lock.json')) packageManagers.push('npm');\nif (entries.some((entry) => entry.path === 'pyproject.toml')) packageManagers.push('python-pep517');\nif (eligibleFiles.length === 0) {\n  throw new Error('No eligible evidence files were found after applying the production-readiness audit filters.');\n}\nreturn {\n  json: {\n    ...context,\n    repositoryInventory: {\n      totalEntries: entries.length,\n      eligibleFileCount: eligibleFiles.length,\n      topLevel,\n      manifests,\n      stack,\n      packageManagers,\n      eligibleFiles,\n      filters: {\n        includePrefixes,\n        includeNames: Array.from(includeNames),\n        excludedSegments: excludeSegments,\n      },\n    },\n    productionDependencies: [],\n  },\n};"
+      }
+    },
+    {
+      "id": "32cc5380-cc3b-438b-9203-ca0a8b8e4b7d",
+      "name": "Fetch Workflow Runs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo + \"/actions/runs\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "branch",
+              "value": "={{ $(\"Resolve Baseline SHA\").first().json.effectiveBranch }}"
+            },
+            {
+              "name": "per_page",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "2c87bb7c-fb5f-429e-b1b5-f47bbbb0305d",
+      "name": "Fetch Check Runs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        240
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo + \"/commits/\" + $(\"Resolve Baseline SHA\").first().json.baselineSha + \"/check-runs\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "a9135841-8246-4006-af71-0574404a0975",
+      "name": "Fetch Commit Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        360
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo + \"/commits/\" + $(\"Resolve Baseline SHA\").first().json.baselineSha + \"/status\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "c2401b14-51f7-426a-a572-62d8c3b4fd8c",
+      "name": "Fetch Deployments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        480
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Validate And Normalize\").first().json.owner + \"/\" + $(\"Validate And Normalize\").first().json.repo + \"/deployments\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "94bc9c29-11a5-459e-b771-1b4bd9cae115",
+      "name": "Expand Evidence Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const inventory = $('Build Inventory').first().json.repositoryInventory;\nconst context = $('Build Inventory').first().json;\nreturn inventory.eligibleFiles.map((file) => ({\n  json: {\n    owner: context.owner,\n    repo: context.repo,\n    effectiveBranch: context.effectiveBranch,\n    baselineSha: context.baselineSha,\n    auditBranch: context.auditBranch,\n    writeReport: context.writeReport,\n    openPr: context.openPr,\n    enforceReadOnlyAgent: context.enforceReadOnlyAgent,\n    path: file.path,\n    sha: file.sha,\n    size: file.size,\n    extension: file.extension,\n    fileIndex: file.index,\n    chunkIndex: file.chunkIndex,\n  },\n}));"
+      }
+    },
+    {
+      "id": "819ffce0-fac2-4888-93f4-1c0cf3f56c16",
+      "name": "Fetch File Blob",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3100,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/blobs/\" + $json.sha }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "1c6485e6-3809-41cd-a968-9a791bc67a07",
+      "name": "Decode Evidence Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3340,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const requestItem = $('Expand Evidence Files').item;\nconst blob = $json;\nconst encoding = blob.encoding || 'utf-8';\nlet content = '';\nif (encoding === 'base64') {\n  content = Buffer.from(blob.content || '', 'base64').toString('utf8');\n} else {\n  content = blob.content || '';\n}\nconst lines = content.split(/\\r?\\n/);\nconst lineChunks = [];\nfor (let start = 0; start < lines.length; start += 200) {\n  const end = Math.min(start + 200, lines.length);\n  lineChunks.push({\n    startLine: start + 1,\n    endLine: end,\n    text: lines.slice(start, end).join('\\n'),\n  });\n}\nreturn {\n  json: {\n    ...requestItem.json,\n    content,\n    lineCount: lines.length,\n    lineChunks,\n  },\n};"
+      }
+    },
+    {
+      "id": "cd47769c-9fda-4335-a36d-f3b49dd056aa",
+      "name": "Build Analysis Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3580,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const files = $input.all().map((item) => item.json).sort((a, b) => a.fileIndex - b.fileIndex);\nconst context = $('Build Inventory').first().json;\nconst workflowRuns = $('Fetch Workflow Runs').first().json;\nconst checkRuns = $('Fetch Check Runs').first().json;\nconst commitStatus = $('Fetch Commit Status').first().json;\nconst deployments = $('Fetch Deployments').first().json;\nconst packageJsonFile = files.find((file) => file.path === 'package.json');\nconst pyprojectFile = files.find((file) => file.path === 'pyproject.toml');\nlet packageScripts = {};\nlet packageManager = context.repositoryInventory.packageManagers;\nif (packageJsonFile) {\n  try {\n    packageScripts = JSON.parse(packageJsonFile.content).scripts || {};\n  } catch (error) {\n    packageScripts = { parseError: error.message };\n  }\n}\nlet pythonMetadata = {};\nif (pyprojectFile) {\n  pythonMetadata = {\n    hasPyproject: true,\n    pytestConfigured: /\\[tool\\.pytest/i.test(pyprojectFile.content),\n    ruffConfigured: /\\[tool\\.ruff/i.test(pyprojectFile.content),\n  };\n}\nconst validationEvidence = {\n  workflowRuns,\n  checkRuns,\n  commitStatus,\n  deployments,\n  packageScripts,\n  pythonMetadata,\n};\nconst evaluateSignal = (names) => {\n  const lowered = names.map((name) => name.toLowerCase());\n  if (lowered.some((name) => /(fail|error|cancel)/.test(name))) return 'FAIL';\n  if (lowered.some((name) => /(success|passed|pass|completed)/.test(name))) return 'PASS';\n  return 'UNKNOWN / ACCESS REQUIRED';\n};\nconst workflowNames = Array.isArray(workflowRuns.workflow_runs) ? workflowRuns.workflow_runs.map((run) => `${run.name || ''} ${run.conclusion || ''}`.trim()) : [];\nconst checkNames = Array.isArray(checkRuns.check_runs) ? checkRuns.check_runs.map((run) => `${run.name || ''} ${run.conclusion || ''}`.trim()) : [];\nconst scriptKeys = Object.keys(packageScripts);\nconst classifyExecution = (scriptNames, extraChecks = []) => {\n  const hasConfig = scriptNames.some((key) => scriptKeys.some((script) => script.toLowerCase().includes(key))) || extraChecks.some(Boolean);\n  if (!hasConfig) return 'NOT CONFIGURED';\n  const signals = workflowNames.concat(checkNames).filter((name) => scriptNames.some((key) => name.toLowerCase().includes(key)));\n  if (signals.length === 0) return 'NOT EXECUTED';\n  return evaluateSignal(signals);\n};\nconst productionDependencies = [\n  { name: 'Dependency installation', status: Array.isArray(workflowRuns.workflow_runs) && workflowRuns.workflow_runs.length ? (workflowNames.some((name) => /success|completed/.test(name.toLowerCase())) ? 'PASS' : evaluateSignal(workflowNames)) : 'UNKNOWN / ACCESS REQUIRED' },\n  { name: 'Lint', status: classifyExecution(['lint', 'ruff'], [pythonMetadata.ruffConfigured]) },\n  { name: 'Typecheck', status: classifyExecution(['typecheck', 'tsc', 'mypy', 'pyright']) },\n  { name: 'Build', status: classifyExecution(['build']) },\n  { name: 'Tests', status: classifyExecution(['test', 'pytest']) },\n  { name: 'Deployments', status: Array.isArray(deployments) ? (deployments.length ? 'UNKNOWN / ACCESS REQUIRED' : 'NOT EXECUTED') : 'UNKNOWN / ACCESS REQUIRED' },\n];\nconst batches = [];\nlet current = [];\nlet currentChars = 0;\nconst maxChars = 60000;\nfor (const file of files) {\n  const serialized = JSON.stringify({\n    path: file.path,\n    lineCount: file.lineCount,\n    lineChunks: file.lineChunks,\n  });\n  if (current.length && currentChars + serialized.length > maxChars) {\n    batches.push(current);\n    current = [];\n    currentChars = 0;\n  }\n  current.push({\n    path: file.path,\n    lineCount: file.lineCount,\n    lineChunks: file.lineChunks,\n  });\n  currentChars += serialized.length;\n}\nif (current.length) batches.push(current);\nreturn batches.map((batch, batchIndex) => ({\n  json: {\n    owner: context.owner,\n    repo: context.repo,\n    effectiveBranch: context.effectiveBranch,\n    auditBranch: context.auditBranch,\n    baselineSha: context.baselineSha,\n    writeReport: context.writeReport,\n    openPr: context.openPr,\n    enforceReadOnlyAgent: true,\n    repository: context.repository,\n    repositoryInventory: context.repositoryInventory,\n    validationEvidence,\n    productionDependencies,\n    batchIndex,\n    totalBatches: batches.length,\n    batch,\n  },\n}));"
+      }
+    },
+    {
+      "id": "8e87115e-8948-4280-936c-ec4a848acc28",
+      "name": "OpenAI Batch Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3820,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4.1',\n  input: [\n    {\n      role: 'system',\n      content: [\n        {\n          type: 'input_text',\n          text: 'You are performing a read-only production-readiness audit batch review. You may inspect, reason, classify, recommend remediation, and prepare evidence-backed implementation instructions, but you must not modify code, request source changes, fabricate evidence, or claim execution without evidence. Treat unknowns as Unknown (Access Required), REQUIRES EXTERNAL INPUT, or Manual Production Action Required as appropriate.'\n        }\n      ]\n    },\n    {\n      role: 'user',\n      content: [\n        {\n          type: 'input_text',\n          text: JSON.stringify({\n            repository: {\n              owner: $json.owner,\n              repo: $json.repo,\n              effective_branch: $json.effectiveBranch,\n              baseline_sha: $json.baselineSha,\n            },\n            repositoryInventory: $json.repositoryInventory,\n            validationEvidence: $json.validationEvidence,\n            productionDependencies: $json.productionDependencies,\n            batchIndex: $json.batchIndex,\n            totalBatches: $json.totalBatches,\n            files: $json.batch,\n            instructions: {\n              enforceReadOnlyAgent: $json.enforceReadOnlyAgent,\n              requiredCoverage: 'Inspect all supplied files and preserve path/line provenance in findings.',\n              auditScope: [\n                'Brand and visual identity',\n                'UI/UX',\n                'Functionality',\n                'Code quality',\n                'Performance',\n                'Security',\n                'Production readiness'\n              ],\n              severityScale: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],\n              dependencyStatusScale: ['PASS', 'FAIL', 'NOT CONFIGURED', 'NOT EXECUTED', 'UNKNOWN / ACCESS REQUIRED']\n            },\n            outputRequirements: {\n              format: 'JSON',\n              keys: ['batch_summary', 'cross_cutting_findings', 'finding_candidates', 'evidence_gaps'],\n              findingShape: ['severity','title','location','current_condition','evidence','why_it_matters','required_remediation','implementation_steps','acceptance_criteria','verification_method','dependencies_blockers','scope']\n            }\n          }, null, 2)\n        }\n      ]\n    }\n  ],\n  text: {\n    format: {\n      type: 'json_schema',\n      name: 'audit_batch_findings',\n      schema: {\n        type: 'object',\n        additionalProperties: false,\n        properties: {\n          batch_summary: { type: 'string' },\n          cross_cutting_findings: { type: 'array', items: { type: 'string' } },\n          evidence_gaps: { type: 'array', items: { type: 'string' } },\n          finding_candidates: {\n            type: 'array',\n            items: {\n              type: 'object',\n              additionalProperties: false,\n              properties: {\n                severity: { type: 'string' },\n                title: { type: 'string' },\n                location: { type: 'string' },\n                current_condition: { type: 'string' },\n                evidence: { type: 'string' },\n                why_it_matters: { type: 'string' },\n                required_remediation: { type: 'string' },\n                implementation_steps: { type: 'array', items: { type: 'string' } },\n                acceptance_criteria: { type: 'array', items: { type: 'string' } },\n                verification_method: { type: 'string' },\n                dependencies_blockers: { type: 'string' },\n                scope: { type: 'string' }\n              },\n              required: ['severity','title','location','current_condition','evidence','why_it_matters','required_remediation','implementation_steps','acceptance_criteria','verification_method','dependencies_blockers','scope']\n            }\n          }\n        },\n        required: ['batch_summary','cross_cutting_findings','evidence_gaps','finding_candidates']\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "ada64ed2-913e-4a6b-b27b-2ad602b4f145",
+      "name": "Aggregate Batch Analyses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4060,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const parseResponseText = (payload) => {\n  if (typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text;\n  if (Array.isArray(payload.output)) {\n    for (const item of payload.output) {\n      if (Array.isArray(item.content)) {\n        for (const contentItem of item.content) {\n          if (typeof contentItem.text === 'string' && contentItem.text.trim()) return contentItem.text;\n        }\n      }\n    }\n  }\n  if (Array.isArray(payload.choices)) {\n    for (const choice of payload.choices) {\n      const text = choice?.message?.content || choice?.text;\n      if (typeof text === 'string' && text.trim()) return text;\n    }\n  }\n  return JSON.stringify(payload);\n};\nconst items = $input.all().map((item) => item.json);\nconst analyses = items.map((item, index) => {\n  const text = parseResponseText(item);\n  let parsed;\n  try {\n    parsed = JSON.parse(text);\n  } catch (error) {\n    parsed = { parse_error: error.message, raw: text };\n  }\n  return { batchIndex: index, parsed };\n});\nconst context = $('Build Analysis Batches').first().json;\nreturn [{\n  json: {\n    ...context,\n    batchAnalyses: analyses,\n  },\n}];"
+      }
+    },
+    {
+      "id": "1a44d72a-9e7b-48e4-b25e-a197941bf204",
+      "name": "OpenAI Generate Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4300,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4.1',\n  input: [\n    {\n      role: 'system',\n      content: [\n        {\n          type: 'input_text',\n          text: 'You are performing a repository production-readiness audit. Execution mode: Audit + remediation plan only. Do NOT modify code. Do NOT apply fixes. Do NOT create implementation commits. Repository evidence is the source of truth. You must produce exactly one complete AUDIT_REPORT.md document using the required headings and findings format. Never claim checks passed unless execution evidence proves it. Where uncertain, explicitly label REQUIRES EXTERNAL INPUT, Unknown (Access Required), or Manual Production Action Required. The agent is strictly read-only.'\n        }\n      ]\n    },\n    {\n      role: 'user',\n      content: [\n        {\n          type: 'input_text',\n          text: JSON.stringify({\n            repository: {\n              owner: $json.owner,\n              repo: $json.repo,\n              effective_branch: $json.effectiveBranch,\n              baseline_sha: $json.baselineSha,\n            },\n            repositoryInventory: $json.repositoryInventory,\n            validationEvidence: $json.validationEvidence,\n            productionDependencies: $json.productionDependencies,\n            batchAnalyses: $json.batchAnalyses,\n            canonicalAuditScope: [\n              'Brand and visual identity: colors, typography, spacing, layout, imagery, logos, consistency, brand compliance, placeholders, photography, cropping, mobile consistency.',\n              'UI/UX: routes/pages, navigation, CTAs, forms, responsiveness, accessibility, flows, broken/confusing/unfinished UI.',\n              'Functionality: buttons, links, forms, APIs, errors, integrations, database interactions, states, edge cases, incomplete flows.',\n              'Code quality: architecture, duplication, maintainability, debt, shared components, hardcoded values, design-token drift, config, dependencies.',\n              'Performance: images/assets, rendering, bundles, loading, caching, database/query concerns, client/server boundaries.',\n              'Security: secrets, environment handling, authn/authz, API method controls, rate limiting, bot protection, input validation, database safety, CSP/headers, production risks.',\n              'Production readiness: deployment blockers, migrations, environment configuration, manual actions, monitoring/observability/error reporting, silent failures.'\n            ],\n            exactReportStructure: [\n              '# Production Readiness Audit',\n              '## Executive Summary',\n              '## Critical Findings',\n              '## High Priority Findings',\n              '## Medium Priority Findings',\n              '## Low Priority Findings',\n              '## Cross-Cutting Design / Brand Issues',\n              '## Cross-Cutting Technical Issues',\n              '## Production Dependencies',\n              '## Master Remediation Roadmap',\n              '### Phase 1 \u2014 Client / Production Blockers',\n              '### Phase 2 \u2014 Brand & Visual Corrections',\n              '### Phase 3 \u2014 UX & Functional Improvements',\n              '### Phase 4 \u2014 Technical Hardening & Cleanup',\n              '### Phase 5 \u2014 Final Production Polish',\n              '## Recommended Execution Order',\n              '## Final Production Acceptance Checklist'\n            ],\n            findingRequirements: {\n              eachFindingMustInclude: [\n                'Severity:',\n                'Location:',\n                'Current Condition:',\n                'Evidence:',\n                'Why It Matters:',\n                'Required Remediation:',\n                'Implementation Steps:',\n                'Acceptance Criteria:',\n                'Verification Method:',\n                'Dependencies / Blockers:',\n                'Scope:'\n              ],\n              severityValues: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],\n              scopeValues: ['Small', 'Medium', 'Large']\n            },\n            roadmapRequirements: 'Each roadmap task must include task, findings resolved, affected files/components, implementation approach, acceptance criteria, verification, and dependencies.',\n            finalChecklistRequirements: ['brand','imagery','desktop','tablet','mobile','accessibility','navigation','forms','APIs','database','security','performance','tests','build','environment variables','production configuration','deployment','smoke testing'],\n            enforcement: {\n              reportOnly: true,\n              writeExactlyOneDocument: 'AUDIT_REPORT.md',\n              noFabrication: true,\n              requireUnknownLabels: true,\n              enforceReadOnlyAgent: $json.enforceReadOnlyAgent\n            }\n          }, null, 2)\n        }\n      ]\n    }\n  ]\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "bafa0d2c-d504-4fda-a45f-74e50dbe9fa5",
+      "name": "Validate Initial Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4540,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const parseResponseText = (payload) => {\n  if (typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text;\n  if (Array.isArray(payload.output)) {\n    for (const item of payload.output) {\n      if (Array.isArray(item.content)) {\n        for (const contentItem of item.content) {\n          if (typeof contentItem.text === 'string' && contentItem.text.trim()) return contentItem.text;\n        }\n      }\n    }\n  }\n  if (Array.isArray(payload.choices)) {\n    for (const choice of payload.choices) {\n      const text = choice?.message?.content || choice?.text;\n      if (typeof text === 'string' && text.trim()) return text;\n    }\n  }\n  return '';\n};\nconst report = parseResponseText($json).trim();\nif (!report) {\n  throw new Error('OpenAI Generate Report returned an empty response.');\n}\nconst requiredHeadings = [\n  '# Production Readiness Audit',\n  '## Executive Summary',\n  '## Critical Findings',\n  '## High Priority Findings',\n  '## Medium Priority Findings',\n  '## Low Priority Findings',\n  '## Cross-Cutting Design / Brand Issues',\n  '## Cross-Cutting Technical Issues',\n  '## Production Dependencies',\n  '## Master Remediation Roadmap',\n  '### Phase 1 \u2014 Client / Production Blockers',\n  '### Phase 2 \u2014 Brand & Visual Corrections',\n  '### Phase 3 \u2014 UX & Functional Improvements',\n  '### Phase 4 \u2014 Technical Hardening & Cleanup',\n  '### Phase 5 \u2014 Final Production Polish',\n  '## Recommended Execution Order',\n  '## Final Production Acceptance Checklist',\n];\nconst missingHeadings = requiredHeadings.filter((heading) => !report.includes(heading));\nconst sectionSlice = (startHeading, endHeading) => {\n  const start = report.indexOf(startHeading);\n  if (start === -1) return '';\n  const end = endHeading ? report.indexOf(endHeading) : report.length;\n  return report.slice(start, end === -1 ? report.length : end);\n};\nconst findingFields = [\n  'Severity:', 'Location:', 'Current Condition:', 'Evidence:', 'Why It Matters:',\n  'Required Remediation:', 'Implementation Steps:', 'Acceptance Criteria:',\n  'Verification Method:', 'Dependencies / Blockers:', 'Scope:'\n];\nconst severitySections = [\n  ['critical', '## Critical Findings', '## High Priority Findings'],\n  ['high', '## High Priority Findings', '## Medium Priority Findings'],\n  ['medium', '## Medium Priority Findings', '## Low Priority Findings'],\n  ['low', '## Low Priority Findings', '## Cross-Cutting Design / Brand Issues'],\n];\nconst severityCounts = {};\nconst remediationValidationFailures = [];\nfor (const [key, startHeading, endHeading] of severitySections) {\n  const section = sectionSlice(startHeading, endHeading);\n  const findings = section.match(/^###\\s+/gm) || [];\n  severityCounts[key] = findings.length;\n  const findingBlocks = section.split(/^###\\s+/m).slice(1);\n  findingBlocks.forEach((block, index) => {\n    const missing = findingFields.filter((field) => !block.includes(field));\n    if (missing.length) {\n      remediationValidationFailures.push(`${startHeading} finding ${index + 1} missing: ${missing.join(', ')}`);\n    }\n  });\n}\nconst executiveSummary = sectionSlice('## Executive Summary', '## Critical Findings');\nconst primaryShipmentBlockers = [...executiveSummary.matchAll(/^-\\s+(.*)$/gm)].map((match) => match[1]).slice(0, 10);\nconst productionDependenciesSection = sectionSlice('## Production Dependencies', '## Master Remediation Roadmap');\nconst validationFailures = [];\nif (missingHeadings.length) validationFailures.push(...missingHeadings.map((heading) => `Missing heading: ${heading}`));\nif (!/overall readiness/i.test(executiveSummary)) validationFailures.push('Executive Summary must include overall readiness.');\nif (!/primary shipment blockers/i.test(executiveSummary)) validationFailures.push('Executive Summary must include primary shipment blockers.');\nif (!/strongest areas/i.test(executiveSummary)) validationFailures.push('Executive Summary must include strongest areas.');\nif (!/immediate action/i.test(executiveSummary)) validationFailures.push('Executive Summary must include immediate action.');\nif (!/CRITICAL:\\s*\\d+/i.test(executiveSummary) || !/HIGH:\\s*\\d+/i.test(executiveSummary) || !/MEDIUM:\\s*\\d+/i.test(executiveSummary) || !/LOW:\\s*\\d+/i.test(executiveSummary)) {\n  validationFailures.push('Executive Summary must include exact severity counts for CRITICAL, HIGH, MEDIUM, and LOW.');\n}\nif (!/PASS|FAIL|NOT CONFIGURED|NOT EXECUTED|UNKNOWN \\/ ACCESS REQUIRED/.test(productionDependenciesSection)) {\n  validationFailures.push('Production Dependencies section must include allowed dependency status values.');\n}\nvalidationFailures.push(...remediationValidationFailures);\nconst context = $('Aggregate Batch Analyses').first().json;\nreturn {\n  json: {\n    ...context,\n    report,\n    validationResults: validationFailures,\n    reportStructureValid: missingHeadings.length === 0,\n    findingRemediationValidationPassed: remediationValidationFailures.length === 0,\n    severityCounts,\n    primaryShipmentBlockers,\n  },\n};"
+      }
+    },
+    {
+      "id": "b8ab8440-c06e-4db0-a8dc-3860b84a529d",
+      "name": "Gate Initial Valid",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4780,
+        220
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if (($json.validationResults || []).length === 0) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "99632811-de03-479b-b8aa-913e6ae16352",
+      "name": "Gate Needs Repair",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4780,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if (($json.validationResults || []).length > 0) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "6764b07a-5161-4883-bf02-c99ccb13f9a9",
+      "name": "OpenAI Repair Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5020,
+        380
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4.1',\n  input: [\n    {\n      role: 'system',\n      content: [\n        {\n          type: 'input_text',\n          text: 'Return a complete replacement AUDIT_REPORT.md that fixes the supplied validation failures. Preserve read-only audit constraints and the required exact structure. Do not explain the repair; return only the full replacement markdown document.'\n        }\n      ]\n    },\n    {\n      role: 'user',\n      content: [\n        {\n          type: 'input_text',\n          text: JSON.stringify({\n            validationFailures: $json.validationResults,\n            previousReport: $json.report,\n            severityCounts: $json.severityCounts,\n            primaryShipmentBlockers: $json.primaryShipmentBlockers,\n            productionDependencies: $json.productionDependencies,\n            exactHeadings: [\n              '# Production Readiness Audit',\n              '## Executive Summary',\n              '## Critical Findings',\n              '## High Priority Findings',\n              '## Medium Priority Findings',\n              '## Low Priority Findings',\n              '## Cross-Cutting Design / Brand Issues',\n              '## Cross-Cutting Technical Issues',\n              '## Production Dependencies',\n              '## Master Remediation Roadmap',\n              '### Phase 1 \u2014 Client / Production Blockers',\n              '### Phase 2 \u2014 Brand & Visual Corrections',\n              '### Phase 3 \u2014 UX & Functional Improvements',\n              '### Phase 4 \u2014 Technical Hardening & Cleanup',\n              '### Phase 5 \u2014 Final Production Polish',\n              '## Recommended Execution Order',\n              '## Final Production Acceptance Checklist'\n            ],\n            requiredFindingFields: [\n              'Severity:',\n              'Location:',\n              'Current Condition:',\n              'Evidence:',\n              'Why It Matters:',\n              'Required Remediation:',\n              'Implementation Steps:',\n              'Acceptance Criteria:',\n              'Verification Method:',\n              'Dependencies / Blockers:',\n              'Scope:'\n            ]\n          }, null, 2)\n        }\n      ]\n    }\n  ]\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "c16397db-101e-4265-8c52-28eec04fd871",
+      "name": "Validate Repaired Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5260,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const parseResponseText = (payload) => {\n  if (typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text;\n  if (Array.isArray(payload.output)) {\n    for (const item of payload.output) {\n      if (Array.isArray(item.content)) {\n        for (const contentItem of item.content) {\n          if (typeof contentItem.text === 'string' && contentItem.text.trim()) return contentItem.text;\n        }\n      }\n    }\n  }\n  if (Array.isArray(payload.choices)) {\n    for (const choice of payload.choices) {\n      const text = choice?.message?.content || choice?.text;\n      if (typeof text === 'string' && text.trim()) return text;\n    }\n  }\n  return '';\n};\nconst report = parseResponseText($json).trim();\nif (!report) {\n  throw new Error('OpenAI Generate Report returned an empty response.');\n}\nconst requiredHeadings = [\n  '# Production Readiness Audit',\n  '## Executive Summary',\n  '## Critical Findings',\n  '## High Priority Findings',\n  '## Medium Priority Findings',\n  '## Low Priority Findings',\n  '## Cross-Cutting Design / Brand Issues',\n  '## Cross-Cutting Technical Issues',\n  '## Production Dependencies',\n  '## Master Remediation Roadmap',\n  '### Phase 1 \u2014 Client / Production Blockers',\n  '### Phase 2 \u2014 Brand & Visual Corrections',\n  '### Phase 3 \u2014 UX & Functional Improvements',\n  '### Phase 4 \u2014 Technical Hardening & Cleanup',\n  '### Phase 5 \u2014 Final Production Polish',\n  '## Recommended Execution Order',\n  '## Final Production Acceptance Checklist',\n];\nconst missingHeadings = requiredHeadings.filter((heading) => !report.includes(heading));\nconst sectionSlice = (startHeading, endHeading) => {\n  const start = report.indexOf(startHeading);\n  if (start === -1) return '';\n  const end = endHeading ? report.indexOf(endHeading) : report.length;\n  return report.slice(start, end === -1 ? report.length : end);\n};\nconst findingFields = [\n  'Severity:', 'Location:', 'Current Condition:', 'Evidence:', 'Why It Matters:',\n  'Required Remediation:', 'Implementation Steps:', 'Acceptance Criteria:',\n  'Verification Method:', 'Dependencies / Blockers:', 'Scope:'\n];\nconst severitySections = [\n  ['critical', '## Critical Findings', '## High Priority Findings'],\n  ['high', '## High Priority Findings', '## Medium Priority Findings'],\n  ['medium', '## Medium Priority Findings', '## Low Priority Findings'],\n  ['low', '## Low Priority Findings', '## Cross-Cutting Design / Brand Issues'],\n];\nconst severityCounts = {};\nconst remediationValidationFailures = [];\nfor (const [key, startHeading, endHeading] of severitySections) {\n  const section = sectionSlice(startHeading, endHeading);\n  const findings = section.match(/^###\\s+/gm) || [];\n  severityCounts[key] = findings.length;\n  const findingBlocks = section.split(/^###\\s+/m).slice(1);\n  findingBlocks.forEach((block, index) => {\n    const missing = findingFields.filter((field) => !block.includes(field));\n    if (missing.length) {\n      remediationValidationFailures.push(`${startHeading} finding ${index + 1} missing: ${missing.join(', ')}`);\n    }\n  });\n}\nconst executiveSummary = sectionSlice('## Executive Summary', '## Critical Findings');\nconst primaryShipmentBlockers = [...executiveSummary.matchAll(/^-\\s+(.*)$/gm)].map((match) => match[1]).slice(0, 10);\nconst productionDependenciesSection = sectionSlice('## Production Dependencies', '## Master Remediation Roadmap');\nconst validationFailures = [];\nif (missingHeadings.length) validationFailures.push(...missingHeadings.map((heading) => `Missing heading: ${heading}`));\nif (!/overall readiness/i.test(executiveSummary)) validationFailures.push('Executive Summary must include overall readiness.');\nif (!/primary shipment blockers/i.test(executiveSummary)) validationFailures.push('Executive Summary must include primary shipment blockers.');\nif (!/strongest areas/i.test(executiveSummary)) validationFailures.push('Executive Summary must include strongest areas.');\nif (!/immediate action/i.test(executiveSummary)) validationFailures.push('Executive Summary must include immediate action.');\nif (!/CRITICAL:\\s*\\d+/i.test(executiveSummary) || !/HIGH:\\s*\\d+/i.test(executiveSummary) || !/MEDIUM:\\s*\\d+/i.test(executiveSummary) || !/LOW:\\s*\\d+/i.test(executiveSummary)) {\n  validationFailures.push('Executive Summary must include exact severity counts for CRITICAL, HIGH, MEDIUM, and LOW.');\n}\nif (!/PASS|FAIL|NOT CONFIGURED|NOT EXECUTED|UNKNOWN \\/ ACCESS REQUIRED/.test(productionDependenciesSection)) {\n  validationFailures.push('Production Dependencies section must include allowed dependency status values.');\n}\nvalidationFailures.push(...remediationValidationFailures);\nconst context = $('Aggregate Batch Analyses').first().json;\nreturn {\n  json: {\n    ...context,\n    report,\n    validationResults: validationFailures,\n    reportStructureValid: missingHeadings.length === 0,\n    findingRemediationValidationPassed: remediationValidationFailures.length === 0,\n    severityCounts,\n    primaryShipmentBlockers,\n  },\n};"
+      }
+    },
+    {
+      "id": "71deaa89-8fc4-4ea6-9db3-b4d790492bc3",
+      "name": "Gate Repair Valid",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if (($json.validationResults || []).length === 0) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "212ffb96-acda-46b5-b265-d294ec22cbd5",
+      "name": "Fail Repair Invalid",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        460
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if (($json.validationResults || []).length > 0) {\n  throw new Error(`AUDIT_REPORT.md validation failed after one repair pass: ${$json.validationResults.join(' | ')}`);\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "5c4724f1-811c-4166-b130-577269a9c9c4",
+      "name": "Finalize Validated Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5740,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    ...$json,\n    auditCompleted: true,\n    validationSummary: {\n      validationResults: $json.validationResults,\n      reportStructureValid: $json.reportStructureValid,\n      findingRemediationValidationPassed: $json.findingRemediationValidationPassed,\n    },\n  },\n};"
+      }
+    },
+    {
+      "id": "41b7cbd8-703d-4d6d-8109-b1d661588e31",
+      "name": "Gate Write Disabled",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5980,
+        220
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if ($json.writeReport === false) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "c13265ba-cca2-4a7a-a94f-f7f9a47f922d",
+      "name": "Return Read Only Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6220,
+        220
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    audit_completed: true,\n    owner: $json.owner,\n    repo: $json.repo,\n    effective_branch: $json.effectiveBranch,\n    audit_branch: $json.auditBranch,\n    baseline_sha: $json.baselineSha,\n    audit_commit_sha: null,\n    audit_report_path: $json.auditReportPath || 'AUDIT_REPORT.md',\n    severity_counts: $json.severityCounts,\n    primary_shipment_blockers: $json.primaryShipmentBlockers,\n    validation_results: $json.validationResults,\n    production_dependencies: $json.productionDependencies,\n    report_structure_valid: $json.reportStructureValid,\n    finding_remediation_validation_passed: $json.findingRemediationValidationPassed,\n    unexpected_file_changes: [],\n    pr_created: false,\n    pr_url: null,\n    audit_report: $json.report,\n  },\n};"
+      }
+    },
+    {
+      "id": "0442ec5b-11bc-4c31-9293-dfdd7e32e99d",
+      "name": "Gate Write Enabled",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5980,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if ($json.writeReport === true) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "6b1ce79b-d56f-4d31-aa22-f2eada38a739",
+      "name": "Create Audit Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6220,
+        380
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/refs\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ref: \"refs/heads/\" + $json.auditBranch, sha: $json.baselineSha }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "00626379-9121-410c-ab12-63987b13e64e",
+      "name": "Write AUDIT_REPORT.md",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6460,
+        380
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ \"https://api.github.com/repos/\" + $(\"Finalize Validated Report\").first().json.owner + \"/\" + $(\"Finalize Validated Report\").first().json.repo + \"/contents/AUDIT_REPORT.md\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  message: $('Finalize Validated Report').first().json.reportCommitMessage,\n  branch: $('Finalize Validated Report').first().json.auditBranch,\n  content: Buffer.from($('Finalize Validated Report').first().json.report, 'utf8').toString('base64')\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "1f50bc78-681a-4b99-8e41-5bd4470a8353",
+      "name": "Capture Audit Commit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6700,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const context = $('Finalize Validated Report').first().json;\nreturn {\n  json: {\n    ...context,\n    auditCommitSha: $json?.commit?.sha || null,\n    writeResponse: $json,\n  },\n};"
+      }
+    },
+    {
+      "id": "915ebd93-7be5-4f8e-938a-9ccaf2ba275a",
+      "name": "Gate Open PR Disabled",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6940,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if ($json.openPr === false) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "3a12bbf2-93ea-445e-8788-da07366e1ab4",
+      "name": "Finalize Written Result No PR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7180,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    audit_completed: true,\n    owner: $json.owner,\n    repo: $json.repo,\n    effective_branch: $json.effectiveBranch,\n    audit_branch: $json.auditBranch,\n    baseline_sha: $json.baselineSha,\n    audit_commit_sha: $json.auditCommitSha,\n    audit_report_path: $json.auditReportPath || 'AUDIT_REPORT.md',\n    severity_counts: $json.severityCounts,\n    primary_shipment_blockers: $json.primaryShipmentBlockers,\n    validation_results: $json.validationResults,\n    production_dependencies: $json.productionDependencies,\n    report_structure_valid: $json.reportStructureValid,\n    finding_remediation_validation_passed: $json.findingRemediationValidationPassed,\n    unexpected_file_changes: [],\n    pr_created: false,\n    pr_url: null,\n  },\n};"
+      }
+    },
+    {
+      "id": "82a72539-18d9-4419-814b-67415d6366a9",
+      "name": "Gate Open PR Enabled",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6940,
+        460
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if ($json.openPr === true) {\n  return { json: $json };\n}\nreturn [];"
+      }
+    },
+    {
+      "id": "13b5b7ff-4adf-47e6-89a2-f39a0d8dc116",
+      "name": "Create Pull Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7180,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/pulls\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  title: $json.pullRequestTitle,\n  head: $json.auditBranch,\n  base: $json.effectiveBranch,\n  body: $json.pullRequestBody\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "ed4ccb50-7727-40f2-b0a4-7809a09031e5",
+      "name": "Finalize Written Result With PR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7420,
+        460
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const context = $('Capture Audit Commit').first().json;\nreturn {\n  json: {\n    audit_completed: true,\n    owner: context.owner,\n    repo: context.repo,\n    effective_branch: context.effectiveBranch,\n    audit_branch: context.auditBranch,\n    baseline_sha: context.baselineSha,\n    audit_commit_sha: context.auditCommitSha,\n    audit_report_path: context.auditReportPath || 'AUDIT_REPORT.md',\n    severity_counts: context.severityCounts,\n    primary_shipment_blockers: context.primaryShipmentBlockers,\n    validation_results: context.validationResults,\n    production_dependencies: context.productionDependencies,\n    report_structure_valid: context.reportStructureValid,\n    finding_remediation_validation_passed: context.findingRemediationValidationPassed,\n    unexpected_file_changes: [],\n    pr_created: true,\n    pr_url: $json.html_url || null,\n  },\n};"
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Runtime Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Runtime Inputs": {
+      "main": [
+        [
+          {
+            "node": "Validate And Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate And Normalize": {
+      "main": [
+        [
+          {
+            "node": "Fetch Repository Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Repository Metadata": {
+      "main": [
+        [
+          {
+            "node": "Resolve Effective Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Effective Branch": {
+      "main": [
+        [
+          {
+            "node": "Fetch Effective Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Effective Branch": {
+      "main": [
+        [
+          {
+            "node": "Resolve Baseline SHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Baseline SHA": {
+      "main": [
+        [
+          {
+            "node": "Fetch Recursive Tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Recursive Tree": {
+      "main": [
+        [
+          {
+            "node": "Validate Tree Coverage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Tree Coverage": {
+      "main": [
+        [
+          {
+            "node": "Build Inventory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Inventory": {
+      "main": [
+        [
+          {
+            "node": "Fetch Workflow Runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Deployments": {
+      "main": [
+        [
+          {
+            "node": "Expand Evidence Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Evidence Files": {
+      "main": [
+        [
+          {
+            "node": "Fetch File Blob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch File Blob": {
+      "main": [
+        [
+          {
+            "node": "Decode Evidence Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Evidence Files": {
+      "main": [
+        [
+          {
+            "node": "Build Analysis Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Analysis Batches": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Batch Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Batch Analysis": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Batch Analyses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Batch Analyses": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Validate Initial Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Initial Report": {
+      "main": [
+        [
+          {
+            "node": "Gate Initial Valid",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Needs Repair",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Needs Repair": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Repair Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Repair Report": {
+      "main": [
+        [
+          {
+            "node": "Validate Repaired Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Repaired Report": {
+      "main": [
+        [
+          {
+            "node": "Gate Repair Valid",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fail Repair Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Initial Valid": {
+      "main": [
+        [
+          {
+            "node": "Finalize Validated Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Repair Valid": {
+      "main": [
+        [
+          {
+            "node": "Finalize Validated Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Validated Report": {
+      "main": [
+        [
+          {
+            "node": "Gate Write Disabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Write Enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Write Disabled": {
+      "main": [
+        [
+          {
+            "node": "Return Read Only Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Write Enabled": {
+      "main": [
+        [
+          {
+            "node": "Create Audit Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Audit Branch": {
+      "main": [
+        [
+          {
+            "node": "Write AUDIT_REPORT.md",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write AUDIT_REPORT.md": {
+      "main": [
+        [
+          {
+            "node": "Capture Audit Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Audit Commit": {
+      "main": [
+        [
+          {
+            "node": "Gate Open PR Disabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Open PR Enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Open PR Disabled": {
+      "main": [
+        [
+          {
+            "node": "Finalize Written Result No PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Open PR Enabled": {
+      "main": [
+        [
+          {
+            "node": "Create Pull Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Pull Request": {
+      "main": [
+        [
+          {
+            "node": "Finalize Written Result With PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Workflow Runs": {
+      "main": [
+        [
+          {
+            "node": "Fetch Check Runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Check Runs": {
+      "main": [
+        [
+          {
+            "node": "Fetch Commit Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Commit Status": {
+      "main": [
+        [
+          {
+            "node": "Fetch Deployments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "ba3987b5-561d-42c5-913f-534b3493a8e8",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "production-readiness-audit-template"
+  },
+  "pinData": {},
+  "tags": []
+}
