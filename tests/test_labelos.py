@@ -5,12 +5,13 @@ from pathlib import Path
 
 import barcode
 import pymupdf
+import pytest
 import qrcode
 from barcode.writer import ImageWriter
 
 from labelos.cli import main
 from labelos.models import LabelSpec
-from labelos.package import create_package, verify_package
+from labelos.package import _sha256, create_package, verify_package
 from labelos.validate import validate
 
 ROOT = Path(__file__).parent.parent
@@ -52,14 +53,87 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_is_reported_without_crashing(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    package_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert package_spec["artwork"] == "passing-label.svg"
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert "artwork byte count mismatch: passing-label.svg" in verify_package(manifest.parent)
+    assert "artwork checksum mismatch: passing-label.svg" in verify_package(manifest.parent)
+
+
+def test_verify_package_rejects_path_traversal_manifest(tmp_path):
+    package = tmp_path / "release"
+    manifest = create_package(passing_spec(), validate(passing_spec()), package)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"] = {
+        "file": "../outside.svg",
+        "sha256": _sha256(ROOT / "fixtures/passing-label.svg"),
+        "bytes": (ROOT / "fixtures/passing-label.svg").stat().st_size,
+    }
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert "artwork manifest filename is unsafe" in verify_package(package)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_failure"),
+    [
+        (lambda data: data.update(schema_version=999), "unsupported manifest schema version: 999"),
+        (
+            lambda data: data["artwork"].update(file="", bytes=-1),
+            "artwork manifest filename is unsafe",
+        ),
+        (
+            lambda data: data["label_spec"].update(sha256="z" * 64),
+            "label_spec manifest checksum is invalid",
+        ),
+    ],
+)
+def test_verify_package_rejects_invalid_manifest_entries(tmp_path, mutation, expected_failure):
+    package = tmp_path / "release"
+    manifest = create_package(passing_spec(), validate(passing_spec()), package)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    mutation(data)
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert expected_failure in verify_package(package)
+
+
+def test_verify_package_requires_passing_report_and_matching_spec(tmp_path):
+    package = tmp_path / "release"
+    manifest = create_package(passing_spec(), validate(passing_spec()), package)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"]["passed"] = False
+    spec_path = package / "label-spec.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec["artwork"] = "different.svg"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    data["label_spec"]["sha256"] = _sha256(spec_path)
+    data["label_spec"]["bytes"] = spec_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    failures = verify_package(package)
+
+    assert "validation_report manifest entry must record a passing report" in failures
+    assert "label_spec artwork does not match packaged artwork" in failures
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
