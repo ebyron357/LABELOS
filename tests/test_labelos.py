@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -58,8 +59,50 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    assert json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))["artwork"] == (
+        "passing-label.svg"
+    )
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_tampered_report_and_spec(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    assert "validation report does not pass" in verify_package(manifest.parent)
+
+
+def test_package_verification_rejects_unsafe_manifest_file(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["artwork"]["file"] = "../outside.pdf"
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    assert "artwork has an unsafe package filename" in verify_package(manifest.parent)
+
+
+def test_invalid_pdf_is_reported_without_crashing(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[0].code == "PDF_INVALID"
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
