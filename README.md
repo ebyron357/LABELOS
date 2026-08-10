@@ -32,8 +32,9 @@ The configuration is JSON:
 
 Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
 and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS. If `barcode_value` or `qr_value` is configured but the decoder cannot load,
-validation fails rather than asserting a code was checked.
+LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
+`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
+code was checked.
 
 ## Commands
 

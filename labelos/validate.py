@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import struct
 from collections.abc import Callable
+from io import BytesIO
+from pathlib import Path
 
 from .models import LabelSpec, Report
 
@@ -94,7 +96,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
         return text
     root = match.group(0)
     width, height = (_svg_mm(root, "width"), _svg_mm(root, "height"))
-    report.checks.extend(["format:svg", "dimensions", "required-copy"])
+    report.checks.extend(["format:svg", "dimensions"])
     if width is None or height is None:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
     else:
@@ -124,7 +126,7 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         page = document[0]
         _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
         text = page.get_text()
-        report.checks.extend(["format:pdf", "dimensions", "required-copy", "pdf-readable"])
+        report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
@@ -168,9 +170,9 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         )
         return
     try:
-        with Image.open(spec.artwork) as image:
+        with _code_image(spec.artwork, Image) as image:
             results = zxingcpp.read_barcodes(image)
-    except (OSError, RuntimeError, ValueError) as error:
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
         return
     decoded = {result.text for result in results}
@@ -178,3 +180,23 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     for kind, expected in expectations:
         if expected and expected not in decoded:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
+
+
+def _code_image(artwork: Path, image_module):
+    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+
+    if artwork.suffix.lower() == ".png":
+        return image_module.open(artwork)
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count < 1:
+            raise ValueError("Artwork contains no pages to decode")
+        page = document[0]
+        pixmap = page.get_pixmap(dpi=300, alpha=False)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
