@@ -58,8 +58,37 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    package_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert package_spec == {
+        "artwork": "passing-label.svg",
+        "barcode_value": None,
+        "bleed_mm": 3.0,
+        "height_mm": 50.0,
+        "min_dpi": 300,
+        "qr_value": None,
+        "required_copy": ["Example Product", "NET 250 g"],
+        "safe_area_mm": 0.0,
+        "schema_version": 1,
+        "trim_mm": 0.0,
+        "width_mm": 100.0,
+    }
+    assert manifest.parent.joinpath("manifest.json").is_file()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["label_spec"]["file"] == "label-spec.json"
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_rejects_manifest_path_escape(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    contents["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["artwork file must be a package-local filename"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
