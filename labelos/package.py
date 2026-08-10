@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,9 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    package_spec = spec.to_dict(artwork_destination.name)
+    spec_path = destination / "label-spec.json"
+    spec_path.write_text(json.dumps(package_spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     manifest = {
@@ -34,9 +38,14 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
         "validation_report": {
             "file": report_path.name,
             "sha256": _sha256(report_path),
+            "bytes": report_path.stat().st_size,
             "passed": report.passed,
         },
-        "spec": report.metadata.get("spec", {}),
+        "spec": {
+            "file": spec_path.name,
+            "sha256": _sha256(spec_path),
+            "bytes": spec_path.stat().st_size,
+        },
     }
     manifest_path = destination / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -52,15 +61,64 @@ def verify_package(destination: Path) -> list[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return [f"manifest.json is invalid JSON: {error}"]
-    failures = []
-    for key in ("artwork", "validation_report"):
-        entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
-        if not path.is_file():
-            failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
+    if not isinstance(manifest, dict):
+        return ["manifest.json root must be an object"]
+    failures: list[str] = []
+    if manifest.get("schema_version") != 1:
+        failures.append("manifest schema_version must be 1")
+    entries: dict[str, Path] = {}
+    for key in ("artwork", "validation_report", "spec"):
+        entry = manifest.get(key)
+        if not isinstance(entry, dict):
+            failures.append(f"{key} entry is missing or invalid")
+            continue
+        path = _package_file(destination, entry.get("file"))
+        if path is None:
+            failures.append(f"{key} file must be a package-local filename")
+            continue
+        entries[key] = path
+        if not path.is_file() or path.is_symlink():
+            failures.append(f"{key} file is missing or is not a regular file: {path.name}")
+            continue
+        if entry.get("bytes") != path.stat().st_size:
+            failures.append(f"{key} byte count mismatch: {path.name}")
+        expected_hash = entry.get("sha256")
+        if not isinstance(expected_hash, str) or not _SHA256.fullmatch(expected_hash):
+            failures.append(f"{key} checksum is not a lowercase SHA-256 digest")
+        elif expected_hash != _sha256(path):
             failures.append(f"{key} checksum mismatch: {path.name}")
+    _validate_report_and_spec(entries, failures)
     return failures
+
+
+def _package_file(destination: Path, value: object) -> Path | None:
+    if not isinstance(value, str) or not value or Path(value).name != value:
+        return None
+    return destination / value
+
+
+def _validate_report_and_spec(entries: dict[str, Path], failures: list[str]) -> None:
+    report_path = entries.get("validation_report")
+    spec_path = entries.get("spec")
+    if report_path is None or spec_path is None:
+        return
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        failures.append(f"validation report is invalid JSON: {error}")
+        return
+    try:
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        failures.append(f"label spec is invalid JSON: {error}")
+        return
+    if not isinstance(report, dict) or report.get("passed") is not True:
+        failures.append("validation report does not record a passing validation")
+    elif report.get("metadata", {}).get("spec") != spec:
+        failures.append("validation report spec does not match packaged label spec")
+
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 def _sha256(path: Path) -> str:

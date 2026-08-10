@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -59,7 +60,33 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_manifest_path_escape(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    contents["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["artwork file must be a package-local filename"]
+
+
+def test_package_verification_requires_passing_matching_report(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    contents["validation_report"]["bytes"] = report_path.stat().st_size
+    contents["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report does not record a passing validation"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -80,6 +107,19 @@ def test_cli_validate_and_package(tmp_path, capsys):
     package = tmp_path / "release"
     assert main(["package", str(config), str(package)]) == 0
     assert main(["verify-package", str(package)]) == 0
+
+
+def test_invalid_pdf_returns_validation_error(tmp_path, capsys):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 10, "height_mm": 10}), encoding="utf-8"
+    )
+
+    assert main(["validate", str(config), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "PDF_INVALID"
 
 
 def test_qr_expected_value_is_decoded(tmp_path):
