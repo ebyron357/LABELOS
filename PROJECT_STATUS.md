@@ -10,7 +10,9 @@
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+  a package-local canonical label specification, and SHA-256 checksums. Verification rejects
+  malformed manifests, non-local paths, symlinks, digest/byte-count mismatches, non-passing
+  reports, and disagreement between the report, manifest, and packaged specification.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,11 +31,13 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-10 from the working tree based on commit
+`1e86abd9e5d0d2e81421ae5dd1265560176d7c69`:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -v                      # 11 passed
 python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos          # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
 python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
@@ -41,8 +45,11 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 11 tests passed; Ruff and bytecode compilation passed; the sdist and wheel were
+generated in `dist/`; and the end-to-end package was created and integrity-verified at
+`/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+decoded expected values. Release-package tests cover tampering, malformed fields, byte counts,
+and report/spec agreement. An invalid PDF test verifies a normal validation error instead of a
+traceback. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.

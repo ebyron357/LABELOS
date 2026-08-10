@@ -32,14 +32,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
-    report.metadata["spec"] = {
-        "width_mm": spec.width_mm,
-        "height_mm": spec.height_mm,
-        "bleed_mm": spec.bleed_mm,
-        "trim_mm": spec.trim_mm,
-        "safe_area_mm": spec.safe_area_mm,
-        "min_dpi": spec.min_dpi,
-    }
+    report.metadata["spec"] = _spec_metadata(spec)
     return report
 
 
@@ -118,7 +111,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, pymupdf.FileDataError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -144,6 +141,22 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _spec_metadata(spec: LabelSpec) -> dict:
+    """Return the complete, package-portable specification represented by a report."""
+    return {
+        "artwork": spec.artwork.name,
+        "width_mm": spec.width_mm,
+        "height_mm": spec.height_mm,
+        "trim_mm": spec.trim_mm,
+        "bleed_mm": spec.bleed_mm,
+        "safe_area_mm": spec.safe_area_mm,
+        "min_dpi": spec.min_dpi,
+        "required_copy": list(spec.required_copy),
+        "barcode_value": spec.barcode_value,
+        "qr_value": spec.qr_value,
+    }
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:

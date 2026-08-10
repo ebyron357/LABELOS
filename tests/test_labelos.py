@@ -57,9 +57,45 @@ def test_package_contains_verified_manifest(tmp_path):
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
+    assert (manifest.parent / "label-spec.json").is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_malformed_or_inconsistent_contents(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    manifest["artwork"]["sha256"] = "A" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(manifest_path.parent) == ["artwork sha256 must be a lowercase SHA-256 digest"]
+
+    manifest["artwork"]["sha256"] = "0" * 64
+    manifest["artwork"]["bytes"] = -1
+    manifest["label_spec"]["file"] = "../outside.json"
+    manifest["validation_report"]["passed"] = False
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(manifest_path.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+        "label_spec file must be a package-local filename",
+        "validation_report must record a passing validation result",
+    ]
+
+
+def test_invalid_pdf_is_a_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
