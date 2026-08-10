@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -59,7 +60,48 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_includes_canonical_spec_and_consistent_report(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest_path.parent
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    package_spec = json.loads((package / "label-spec.json").read_text(encoding="utf-8"))
+    report = json.loads((package / "validation-report.json").read_text(encoding="utf-8"))
+
+    assert package_spec == manifest["spec"]
+    assert report["metadata"]["spec"] == package_spec
+    assert package_spec["artwork"] == "passing-label.svg"
+    assert package_spec["schema_version"] == 1
+    assert not verify_package(package)
+
+
+def test_verify_package_rejects_semantically_tampered_report(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest_path.parent
+    report_path = package / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(package) == ["validation report is not passing"]
+
+
+def test_verify_package_rejects_unsafe_manifest_filename(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["label_spec"]["file"] = "../label-spec.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "manifest label_spec filename is invalid" in verify_package(manifest_path.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
