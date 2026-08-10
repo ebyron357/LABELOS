@@ -52,6 +52,20 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_returns_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -59,7 +73,57 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_tampered_validation_report(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    failures = verify_package(manifest.parent)
+
+    assert "validation_report byte count mismatch: validation-report.json" in failures
+    assert "validation_report checksum mismatch: validation-report.json" in failures
+    assert "validation report does not record a passing result" in failures
+
+
+def test_package_verification_rejects_unsafe_manifest_entry(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = verify_package(manifest_path.parent)
+
+    assert "artwork file name is invalid" in failures
+
+
+def test_package_verification_rejects_missing_canonical_label_spec(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    (manifest.parent / "label-spec.json").unlink()
+
+    assert "label_spec file is missing or not a regular file: label-spec.json" in verify_package(
+        manifest.parent
+    )
+
+
+def test_package_verification_rejects_symlinked_artwork(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    artwork = manifest.parent / "passing-label.svg"
+    replacement = tmp_path / "replacement.svg"
+    replacement.write_text(artwork.read_text(encoding="utf-8"), encoding="utf-8")
+    artwork.unlink()
+    artwork.symlink_to(replacement)
+
+    assert "artwork file is missing or not a regular file: passing-label.svg" in verify_package(
+        manifest.parent
+    )
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
