@@ -58,8 +58,39 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert set(manifest_data) == {
+        "artwork",
+        "created_at",
+        "label_spec",
+        "schema_version",
+        "validation_report",
+    }
+    packaged_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert packaged_spec == {
+        "artwork": "passing-label.svg",
+        "bleed_mm": 3.0,
+        "height_mm": 50.0,
+        "min_dpi": 300,
+        "required_copy": ["Example Product", "NET 250 g"],
+        "safe_area_mm": 0.0,
+        "trim_mm": 0.0,
+        "width_mm": 100.0,
+    }
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == ["artwork byte count mismatch: passing-label.svg"]
+
+
+def test_package_rejects_malformed_or_unsafe_manifest(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest.write_text("[]", encoding="utf-8")
+    assert verify_package(manifest.parent) == ["manifest root must be a JSON object"]
+
+    manifest_data["label_spec"]["file"] = "../outside.json"
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+    assert verify_package(manifest.parent) == ["label_spec file name is unsafe: '../outside.json'"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
