@@ -1,0 +1,7 @@
+{
+  "artwork": "failing-missing-copy.svg",
+  "width_mm": 100,
+  "height_mm": 50,
+  "bleed_mm": 3,
+  "required_copy": ["Required copy deliberately absent"]
+}

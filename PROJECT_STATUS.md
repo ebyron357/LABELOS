@@ -10,8 +10,10 @@
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
-- Passing and failing fixture coverage plus CLI/package regression tests.
+  normalized label specification, and SHA-256 checksums.
+- Manifest verification rejects unsupported schemas and path-traversal file entries before
+  reading package content.
+- Passing and failing SVG fixture coverage plus CLI/package/doctor regression tests.
 
 ## Known external/human blockers
 
@@ -26,23 +28,28 @@
 1. Add approved product specs and both passing/failing artwork fixtures for every SKU.
 2. Add the licensed Callas adapter/profile when the printer supplies its preflight target.
 3. Run the full verification commands recorded below for each release.
+4. Define approved semantics for `trim_mm` and content safe-area enforcement before enabling
+   either check as a release gate. The current implementation validates their configuration
+   sanity only; it does not infer artwork content bounds.
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-10 before the associated commit:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -v                      # 13 passed
 python3 -m ruff check .                   # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+release_dir="$(mktemp -d)/release"
+python3 -m labelos.cli package examples/label.json "$release_dir" --json
+python3 -m labelos.cli verify-package "$release_dir" --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 13 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; an
+end-to-end package was created and checksum-verified; and both committed negative fixtures
+correctly returned exit status 1 from `labelos validate`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.

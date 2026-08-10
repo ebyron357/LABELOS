@@ -58,8 +58,40 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    packaged_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert packaged_spec["artwork"] == "passing-label.svg"
+    assert packaged_spec["bleed_mm"] == 3
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+
+
+def test_package_verification_rejects_manifest_path_escape(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["artwork file name is unsafe"]
+
+
+def test_package_verification_rejects_unknown_manifest_schema(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["schema_version"] = 99
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["unsupported manifest schema version: 99"]
+
+
+def test_static_failing_fixtures_report_expected_errors():
+    for config_name, expected_code in (
+        ("failing-dimensions.json", "DIMENSIONS_MISMATCH"),
+        ("failing-missing-copy.json", "REQUIRED_COPY_MISSING"),
+    ):
+        config = ROOT / "fixtures" / config_name
+        spec = LabelSpec.from_dict(json.loads(config.read_text(encoding="utf-8")), config.parent)
+
+        assert expected_code in {issue.code for issue in validate(spec).issues}
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -80,6 +112,14 @@ def test_cli_validate_and_package(tmp_path, capsys):
     package = tmp_path / "release"
     assert main(["package", str(config), str(package)]) == 0
     assert main(["verify-package", str(package)]) == 0
+
+
+def test_cli_doctor_reports_optional_tool_status(capsys):
+    assert main(["doctor", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["passed"]
+    assert not result["tools"]["Callas pdfToolbox"]["available"]
 
 
 def test_qr_expected_value_is_decoded(tmp_path):
