@@ -40,9 +40,11 @@ code was checked.
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
   required copy, and configured barcode/QR values.
-- `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+- `labelos package CONFIG DESTINATION`: validates, then writes artwork, a package-local
+  `label-spec.json`, a JSON validation report, and a SHA-256 manifest. Existing package
+  destinations are never overwritten.
+- `labelos verify-package DESTINATION`: verifies checksums and byte counts, regular
+  package-local files, manifest/report/spec agreement, and that the recorded validation passed.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
@@ -52,3 +54,7 @@ The core validator provides reproducible local checks and package integrity. Com
 prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
 and a Callas adapter are not present in this repository; they must be supplied and approved
 by the appropriate owner before a particular label can be certified for print.
+
+Release-package verification accepts only schema version 1 and rejects symlinks, nested or
+traversal filenames, malformed manifests, invalid checksums, stale byte counts, failed reports,
+and disagreement between the manifest, report, and package-local label specification.

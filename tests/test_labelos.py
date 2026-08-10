@@ -1,5 +1,6 @@
 import json
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -58,8 +59,48 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    package_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert package_spec["artwork"] == "passing-label.svg"
+    assert package_spec["barcode_value"] is None
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_manifest_path_traversal(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["artwork file must be a package-local filename"]
+
+
+def test_package_verification_requires_passing_report(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"]["sha256"] = sha256(report_path.read_bytes()).hexdigest()
+    data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report does not record a passing validation result"]
+
+
+def test_invalid_pdf_returns_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[0].code == "PDF_INVALID"
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

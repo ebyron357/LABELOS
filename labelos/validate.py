@@ -39,6 +39,9 @@ def validate(spec: LabelSpec) -> Report:
         "trim_mm": spec.trim_mm,
         "safe_area_mm": spec.safe_area_mm,
         "min_dpi": spec.min_dpi,
+        "required_copy": list(spec.required_copy),
+        "barcode_value": spec.barcode_value,
+        "qr_value": spec.qr_value,
     }
     return report
 
@@ -118,8 +121,8 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
     try:
+        document = pymupdf.open(spec.artwork)
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
             return ""
@@ -131,8 +134,12 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
         return text
+    except (OSError, RuntimeError) as error:
+        report.add("PDF_INVALID", "error", f"Could not read PDF artwork: {error}")
+        return ""
     finally:
-        document.close()
+        if "document" in locals():
+            document.close()
 
 
 def _validate_physical_size(spec: LabelSpec, width: float, height: float, report: Report) -> None:
