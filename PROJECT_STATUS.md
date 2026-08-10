@@ -35,7 +35,7 @@
 
 ## Verification record
 
-Verified on 2026-08-10 from the working tree containing release-package integrity hardening:
+Verified on 2026-08-10 from commit `520f6f3dae30b7b1e9371459ba67736ab0ffd78e`:
 
 ```text
 python3 -m pytest -v                      # 15 passed
