@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -58,8 +59,52 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
-    (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
+    packaged_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert packaged_spec == spec.to_dict(artwork="passing-label.svg")
+    artwork_path = manifest.parent / "passing-label.svg"
+    artwork_path.write_text("x" * artwork_path.stat().st_size, encoding="utf-8")
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+
+
+def test_verify_package_rejects_manifest_path_escape(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["artwork manifest filename is unsafe"]
+
+
+def test_verify_package_rejects_malformed_entry(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["label_spec"]["bytes"] = "not-a-byte-count"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["label_spec manifest byte count is invalid"]
+
+
+def test_verify_package_requires_known_manifest_schema(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 2
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["manifest schema_version must be 1"]
+
+
+def test_verify_package_requires_spec_artwork_to_match_manifest(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    spec_path = manifest.parent / "label-spec.json"
+    data = json.loads(spec_path.read_text(encoding="utf-8"))
+    data["artwork"] = "other.svg"
+    spec_path.write_text(json.dumps(data), encoding="utf-8")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["label_spec"]["sha256"] = hashlib.sha256(spec_path.read_bytes()).hexdigest()
+    manifest_data["label_spec"]["bytes"] = spec_path.stat().st_size
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["label_spec artwork does not match manifest artwork"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

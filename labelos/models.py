@@ -84,6 +84,21 @@ class LabelSpec:
             **values,
         )
 
+    def to_dict(self, artwork: str | None = None) -> dict[str, Any]:
+        """Return the complete, JSON-serializable label configuration."""
+        return {
+            "artwork": artwork or str(self.artwork),
+            "width_mm": self.width_mm,
+            "height_mm": self.height_mm,
+            "trim_mm": self.trim_mm,
+            "bleed_mm": self.bleed_mm,
+            "safe_area_mm": self.safe_area_mm,
+            "min_dpi": self.min_dpi,
+            "required_copy": list(self.required_copy),
+            "barcode_value": self.barcode_value,
+            "qr_value": self.qr_value,
+        }
+
 
 def _optional_string(value: Any) -> str | None:
     if value is None:
