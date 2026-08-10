@@ -58,8 +58,46 @@ def test_package_contains_verified_manifest(tmp_path):
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    package_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert package_spec["artwork"] == "passing-label.svg"
+    assert package_spec["required_copy"] == ["Example Product", "NET 250 g"]
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_unsafe_manifest_path(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == [
+        "artwork file is invalid: filename must be a package-local basename"
+    ]
+
+
+def test_package_verification_rejects_unknown_schema(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 999
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["unsupported manifest schema version: 999"]
+
+
+def test_package_verification_handles_malformed_entries(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"] = "not-an-entry"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == [
+        "validation_report entry must be an object",
+        "validation_report must record a passing validation result",
+    ]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
