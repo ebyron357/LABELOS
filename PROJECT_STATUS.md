@@ -10,7 +10,9 @@
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+  canonical package-local label specification, and SHA-256 checksums.
+- Package verification rejects unsafe manifest paths and verifies the schema, checksums, and byte
+  counts for every package artifact.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,10 +31,10 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-10 from the current delivery branch before its next commit:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest                         # 10 passed
 python3 -m ruff check .                   # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
@@ -41,7 +43,7 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
+Results: 10 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
 end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their

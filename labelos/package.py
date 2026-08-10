@@ -23,20 +23,17 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
     shutil.copy2(spec.artwork, artwork_destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    spec_path = destination / "label-spec.json"
+    spec_path.write_text(
+        json.dumps(_package_spec(spec, artwork_destination.name), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     manifest = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "artwork": {
-            "file": artwork_destination.name,
-            "sha256": _sha256(artwork_destination),
-            "bytes": artwork_destination.stat().st_size,
-        },
-        "validation_report": {
-            "file": report_path.name,
-            "sha256": _sha256(report_path),
-            "passed": report.passed,
-        },
-        "spec": report.metadata.get("spec", {}),
+        "artwork": _manifest_entry(artwork_destination),
+        "validation_report": _manifest_entry(report_path),
+        "label_spec": _manifest_entry(spec_path),
     }
     manifest_path = destination / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -52,15 +49,53 @@ def verify_package(destination: Path) -> list[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return [f"manifest.json is invalid JSON: {error}"]
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        return ["manifest.json has an unsupported schema version"]
     failures = []
-    for key in ("artwork", "validation_report"):
-        entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
+    for key in ("artwork", "validation_report", "label_spec"):
+        entry = manifest.get(key)
+        if not isinstance(entry, dict):
+            failures.append(f"{key} manifest entry is missing or invalid")
+            continue
+        filename = entry.get("file")
+        if not _is_safe_filename(filename):
+            failures.append(f"{key} file path is unsafe")
+            continue
+        path = destination / filename
         if not path.is_file():
-            failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
-            failures.append(f"{key} checksum mismatch: {path.name}")
+            failures.append(f"{key} file is missing: {filename}")
+            continue
+        if entry.get("sha256") != _sha256(path):
+            failures.append(f"{key} checksum mismatch: {filename}")
+        if entry.get("bytes") != path.stat().st_size:
+            failures.append(f"{key} byte count mismatch: {filename}")
     return failures
+
+
+def _package_spec(spec: LabelSpec, artwork_filename: str) -> dict[str, object]:
+    return {
+        "artwork": artwork_filename,
+        "barcode_value": spec.barcode_value,
+        "bleed_mm": spec.bleed_mm,
+        "height_mm": spec.height_mm,
+        "min_dpi": spec.min_dpi,
+        "qr_value": spec.qr_value,
+        "required_copy": list(spec.required_copy),
+        "safe_area_mm": spec.safe_area_mm,
+        "trim_mm": spec.trim_mm,
+        "width_mm": spec.width_mm,
+    }
+
+
+def _manifest_entry(path: Path) -> dict[str, str | int]:
+    return {"file": path.name, "sha256": _sha256(path), "bytes": path.stat().st_size}
+
+
+def _is_safe_filename(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    path = Path(value)
+    return path.name == value and not path.is_absolute() and value not in {".", ".."}
 
 
 def _sha256(path: Path) -> str:
