@@ -130,6 +130,28 @@ def test_pdf_safe_area_violation_fails(tmp_path):
     assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
 
 
+def test_invalid_pdf_returns_structured_validation_error(tmp_path, capsys):
+    artwork = tmp_path / "corrupt.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[-1].code == "PDF_INVALID"
+
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}),
+        encoding="utf-8",
+    )
+    assert main(["validate", str(config), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["issues"][-1]["code"] == "PDF_INVALID"
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
