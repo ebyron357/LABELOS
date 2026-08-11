@@ -32,7 +32,7 @@
 
 ## Verification record
 
-Verified on 2026-08-11 from the safe-area validation change:
+Verified on 2026-08-11 from commit `59ec802` (`fix: enforce label safe-area validation`):
 
 ```text
 python3 -m pytest -q                      # 12 passed
