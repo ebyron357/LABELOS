@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -52,6 +53,89 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_svg_safe_area_accepts_content_inside_boundary(tmp_path):
+    artwork = tmp_path / "inside.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" '
+            'viewBox="0 0 106 56"><rect x="5" y="5" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+    assert validate(spec).passed
+
+
+def test_svg_safe_area_rejects_content_outside_boundary(tmp_path):
+    artwork = tmp_path / "outside.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" '
+            'viewBox="0 0 106 56"><rect x="4" y="5" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+    assert {issue.code for issue in validate(spec).issues} == {"SAFE_AREA_VIOLATION"}
+
+
+def test_png_safe_area_rejects_nonwhite_content_outside_boundary(tmp_path):
+    artwork = tmp_path / "outside.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((40, 50, 100, 100), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
+def test_pdf_safe_area_rejects_text_outside_boundary(tmp_path):
+    artwork = tmp_path / "outside.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.insert_text((4 / (25.4 / 72), 10 / (25.4 / 72)), "outside")
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -59,7 +143,27 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert set(verify_package(manifest.parent)) == {
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    }
+
+
+def test_package_rejects_manifest_path_escape_and_spec_mismatch(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert "artwork file path is invalid" in verify_package(manifest_path.parent)
+
+    manifest["artwork"]["file"] = "passing-label.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    label_spec = manifest_path.parent / "label-spec.json"
+    payload = json.loads(label_spec.read_text(encoding="utf-8"))
+    payload["width_mm"] = 999
+    label_spec.write_text(json.dumps(payload), encoding="utf-8")
+    assert "label_spec checksum mismatch: label-spec.json" in verify_package(manifest_path.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

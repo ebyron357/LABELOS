@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import struct
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
@@ -32,14 +33,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
-    report.metadata["spec"] = {
-        "width_mm": spec.width_mm,
-        "height_mm": spec.height_mm,
-        "bleed_mm": spec.bleed_mm,
-        "trim_mm": spec.trim_mm,
-        "safe_area_mm": spec.safe_area_mm,
-        "min_dpi": spec.min_dpi,
-    }
+    report.metadata["spec"] = _spec_metadata(spec)
     return report
 
 
@@ -53,7 +47,24 @@ def _validate_png(spec: LabelSpec, report: Report) -> str:
     report.checks.extend(["format:png", "dimensions", "raster-resolution"])
     report.metadata["pixels"] = {"width": width, "height": height}
     _validate_pixel_dimensions(spec, width, height, dpi, report)
+    _validate_png_safe_area(spec, report)
     return ""
+
+
+def _spec_metadata(spec: LabelSpec) -> dict[str, object]:
+    """Return a serializable, package-local representation of the validated configuration."""
+    return {
+        "artwork": spec.artwork.name,
+        "width_mm": spec.width_mm,
+        "height_mm": spec.height_mm,
+        "trim_mm": spec.trim_mm,
+        "bleed_mm": spec.bleed_mm,
+        "safe_area_mm": spec.safe_area_mm,
+        "min_dpi": spec.min_dpi,
+        "required_copy": list(spec.required_copy),
+        "barcode_value": spec.barcode_value,
+        "qr_value": spec.qr_value,
+    }
 
 
 def _png_dpi(data: bytes) -> float | None:
@@ -101,6 +112,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
     else:
         _validate_physical_size(spec, width, height, report)
+    _validate_svg_safe_area(spec, text, width, height, report)
     return text
 
 
@@ -118,13 +130,18 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not read PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
             return ""
         page = document[0]
         _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
+        _validate_pdf_safe_area(spec, page, report)
         text = page.get_text()
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
@@ -144,6 +161,155 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _safe_bounds(spec: LabelSpec) -> tuple[float, float, float, float]:
+    """Return the permitted artwork bounds in mm, measured from the bleed edge."""
+    inset = spec.bleed_mm + spec.safe_area_mm
+    return (
+        inset,
+        inset,
+        spec.width_mm + 2 * spec.bleed_mm - inset,
+        spec.height_mm + 2 * spec.bleed_mm - inset,
+    )
+
+
+def _validate_bounds(
+    report: Report, bounds: tuple[float, float, float, float], source: str
+) -> None:
+    left, top, right, bottom = bounds
+    safe_left, safe_top, safe_right, safe_bottom = report.metadata["_safe_bounds"]
+    if left < safe_left or top < safe_top or right > safe_right or bottom > safe_bottom:
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            (
+                f"{source} at {left:.2f},{top:.2f}–{right:.2f},{bottom:.2f} mm "
+                f"extends outside the safe area"
+            ),
+        )
+
+
+def _safe_area_setup(spec: LabelSpec, report: Report) -> bool:
+    if not spec.safe_area_mm:
+        return False
+    report.checks.append("safe-area")
+    report.metadata["_safe_bounds"] = _safe_bounds(spec)
+    return True
+
+
+def _safe_area_finish(report: Report) -> None:
+    report.metadata.pop("_safe_bounds", None)
+
+
+def _validate_png_safe_area(spec: LabelSpec, report: Report) -> None:
+    if not _safe_area_setup(spec, report):
+        return
+    try:
+        from PIL import Image, ImageChops
+
+        with Image.open(spec.artwork) as image:
+            rgba = image.convert("RGBA")
+            substrate = Image.new("RGBA", rgba.size, "white")
+            rendered = Image.alpha_composite(substrate, rgba).convert("RGB")
+            occupied = ImageChops.difference(rendered, Image.new("RGB", rgba.size, "white")).getbbox()
+            if occupied is not None:
+                left, top, right, bottom = occupied
+                width_mm = spec.width_mm + 2 * spec.bleed_mm
+                height_mm = spec.height_mm + 2 * spec.bleed_mm
+                _validate_bounds(
+                    report,
+                    (
+                        left * width_mm / image.width,
+                        top * height_mm / image.height,
+                        right * width_mm / image.width,
+                        bottom * height_mm / image.height,
+                    ),
+                    "Non-white PNG content",
+                )
+    except (OSError, ValueError) as error:
+        report.add("PNG_INVALID", "error", f"Could not inspect PNG safe area: {error}")
+    finally:
+        _safe_area_finish(report)
+
+
+def _validate_svg_safe_area(
+    spec: LabelSpec, text: str, width_mm: float | None, height_mm: float | None, report: Report
+) -> None:
+    if not _safe_area_setup(spec, report):
+        return
+    try:
+        if width_mm is None or height_mm is None:
+            raise ValueError("SVG physical dimensions are required")
+        root = ET.fromstring(text)
+        view_box = root.get("viewBox")
+        if not view_box:
+            raise ValueError("SVG viewBox is required")
+        values = [float(value) for value in re.split(r"[\s,]+", view_box.strip())]
+        if len(values) != 4 or values[2] <= 0 or values[3] <= 0:
+            raise ValueError("SVG viewBox must contain four positive values")
+        origin_x, origin_y, view_width, view_height = values
+        for element in root.iter():
+            if element.get("transform"):
+                raise ValueError("transformed SVG geometry is not supported")
+            tag = element.tag.rsplit("}", 1)[-1]
+            if tag not in {"rect", "image", "text"}:
+                continue
+            if tag == "rect" and _svg_is_white_fill(element.get("fill")):
+                continue
+            x = _svg_number(element.get("x", "0"))
+            y = _svg_number(element.get("y", "0"))
+            if tag == "text":
+                item = (x, y, x, y)
+            else:
+                item = (x, y, x + _svg_number(element.get("width")), y + _svg_number(element.get("height")))
+            _validate_bounds(
+                report,
+                (
+                    (item[0] - origin_x) * width_mm / view_width,
+                    (item[1] - origin_y) * height_mm / view_height,
+                    (item[2] - origin_x) * width_mm / view_width,
+                    (item[3] - origin_y) * height_mm / view_height,
+                ),
+                f"SVG {tag}",
+            )
+    except (ET.ParseError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect SVG safe area: {error}")
+    finally:
+        _safe_area_finish(report)
+
+
+def _svg_number(value: str | None) -> float:
+    if value is None:
+        raise ValueError("SVG geometry attribute is missing")
+    match = re.fullmatch(r"\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*", value)
+    if not match:
+        raise ValueError(f"SVG geometry value is unsupported: {value!r}")
+    return float(match.group(1))
+
+
+def _svg_is_white_fill(value: str | None) -> bool:
+    return value is not None and value.strip().lower() in {"#fff", "#ffffff", "white"}
+
+
+def _validate_pdf_safe_area(spec: LabelSpec, page, report: Report) -> None:
+    if not _safe_area_setup(spec, report):
+        return
+    try:
+        boxes = [block[:4] for block in page.get_text("blocks")]
+        for image in page.get_images(full=True):
+            boxes.extend(tuple(rect) for rect in page.get_image_rects(image[0]))
+        boxes.extend(tuple(drawing["rect"]) for drawing in page.get_drawings())
+        for left, top, right, bottom in boxes:
+            _validate_bounds(
+                report,
+                (left * MM_PER_POINT, top * MM_PER_POINT, right * MM_PER_POINT, bottom * MM_PER_POINT),
+                "PDF content",
+            )
+    except (RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect PDF safe area: {error}")
+    finally:
+        _safe_area_finish(report)
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
