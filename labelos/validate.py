@@ -32,14 +32,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
-    report.metadata["spec"] = {
-        "width_mm": spec.width_mm,
-        "height_mm": spec.height_mm,
-        "bleed_mm": spec.bleed_mm,
-        "trim_mm": spec.trim_mm,
-        "safe_area_mm": spec.safe_area_mm,
-        "min_dpi": spec.min_dpi,
-    }
+    report.metadata["spec"] = spec.to_dict(artwork=spec.artwork.name)
     return report
 
 

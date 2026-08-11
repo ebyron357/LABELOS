@@ -1,5 +1,6 @@
 import json
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -59,7 +60,50 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_records_canonical_spec_and_rejects_traversal(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["label_spec"]["file"] == "label-spec.json"
+    assert manifest["label_spec"]["bytes"] > 0
+    assert manifest["spec"]["artwork"] == "passing-label.svg"
+
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "artwork file path is invalid" in verify_package(manifest_path.parent)
+
+
+def test_package_rejects_symlinked_artifacts(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    artwork_path = manifest_path.parent / "passing-label.svg"
+    artwork_path.unlink()
+    artwork_path.symlink_to(ROOT / "fixtures/passing-label.svg")
+
+    assert "artwork file is missing or is not a regular file: passing-label.svg" in verify_package(
+        manifest_path.parent
+    )
+
+
+def test_package_rejects_non_passing_report_with_valid_checksum(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest_path.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["sha256"] = sha256(report_path.read_bytes()).hexdigest()
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    assert "validation report does not record a passing result" in verify_package(manifest_path.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
