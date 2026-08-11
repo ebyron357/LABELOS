@@ -5,12 +5,21 @@ from __future__ import annotations
 import re
 import struct
 from collections.abc import Callable
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+
+
+@dataclass(frozen=True)
+class _ContentBounds:
+    left: float
+    top: float
+    right: float
+    bottom: float
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -53,6 +62,13 @@ def _validate_png(spec: LabelSpec, report: Report) -> str:
     report.checks.extend(["format:png", "dimensions", "raster-resolution"])
     report.metadata["pixels"] = {"width": width, "height": height}
     _validate_pixel_dimensions(spec, width, height, dpi, report)
+    _validate_safe_area_from_image(
+        spec,
+        report,
+        _open_image(data),
+        spec.width_mm + 2 * spec.bleed_mm,
+        spec.height_mm + 2 * spec.bleed_mm,
+    )
     return ""
 
 
@@ -101,6 +117,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
     else:
         _validate_physical_size(spec, width, height, report)
+        _validate_safe_area_from_artwork(spec, report, width, height)
     return text
 
 
@@ -124,7 +141,10 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
             return ""
         page = document[0]
-        _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
+        width_mm = page.rect.width * MM_PER_POINT
+        height_mm = page.rect.height * MM_PER_POINT
+        _validate_physical_size(spec, width_mm, height_mm, report)
+        _validate_safe_area_from_artwork(spec, report, width_mm, height_mm)
         text = page.get_text()
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
@@ -144,6 +164,116 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _open_image(data: bytes):
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        image = Image.open(BytesIO(data))
+        image.load()
+        return image
+    except (OSError, ValueError):
+        return None
+
+
+def _validate_safe_area_from_artwork(
+    spec: LabelSpec, report: Report, width_mm: float, height_mm: float
+) -> None:
+    if spec.safe_area_mm == 0:
+        return
+    try:
+        import pymupdf
+    except ImportError:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", "Install PyMuPDF to inspect vector safe areas")
+        return
+    try:
+        document = pymupdf.open(spec.artwork)
+        try:
+            if document.page_count != 1:
+                return
+            pixmap = document[0].get_pixmap(dpi=300, alpha=True)
+        finally:
+            document.close()
+        _validate_safe_area_from_image(
+            spec, report, _open_image(pixmap.tobytes("png")), width_mm, height_mm
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", f"Could not render artwork for safe-area check: {error}")
+
+
+def _validate_safe_area_from_image(
+    spec: LabelSpec, report: Report, image, width_mm: float, height_mm: float
+) -> None:
+    """Check non-background artwork marks stay within the trim-safe rectangle."""
+
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    if image is None:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", "Install Pillow to inspect safe-area content")
+        return
+    bounds = _content_bounds(image)
+    safe_left = spec.bleed_mm + spec.safe_area_mm
+    safe_top = safe_left
+    safe_right = width_mm - safe_left
+    safe_bottom = height_mm - safe_top
+    report.metadata["safe_area"] = {
+        "allowed_bounds_mm": {
+            "left": round(safe_left, 3),
+            "top": round(safe_top, 3),
+            "right": round(safe_right, 3),
+            "bottom": round(safe_bottom, 3),
+        },
+        "content_detected": bounds is not None,
+    }
+    if bounds is None:
+        return
+    content = {
+        "left": round(bounds.left / image.width * width_mm, 3),
+        "top": round(bounds.top / image.height * height_mm, 3),
+        "right": round(bounds.right / image.width * width_mm, 3),
+        "bottom": round(bounds.bottom / image.height * height_mm, 3),
+    }
+    report.metadata["safe_area"]["content_bounds_mm"] = content
+    if (
+        content["left"] < safe_left
+        or content["top"] < safe_top
+        or content["right"] > safe_right
+        or content["bottom"] > safe_bottom
+    ):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            "Detected non-background artwork extends outside the configured safe area",
+        )
+
+
+def _content_bounds(image) -> _ContentBounds | None:
+    """Find visible marks relative to the colour sampled from the canvas corners."""
+
+    from PIL import Image, ImageChops
+
+    rgba = image.convert("RGBA")
+    corners = (
+        rgba.getpixel((0, 0)),
+        rgba.getpixel((rgba.width - 1, 0)),
+        rgba.getpixel((0, rgba.height - 1)),
+        rgba.getpixel((rgba.width - 1, rgba.height - 1)),
+    )
+    opaque_corners = [pixel for pixel in corners if pixel[3] > 16]
+    if opaque_corners:
+        background = tuple(sorted(pixel[index] for pixel in opaque_corners)[len(opaque_corners) // 2] for index in range(3))
+        color_mask = ImageChops.difference(rgba.convert("RGB"), Image.new("RGB", rgba.size, background))
+        color_mask = color_mask.convert("L").point(lambda value: 255 if value > 12 else 0, mode="1")
+        alpha_mask = rgba.getchannel("A").point(lambda value: 255 if value > 16 else 0, mode="1")
+        mask = ImageChops.logical_and(color_mask, alpha_mask)
+    else:
+        mask = rgba.getchannel("A").point(lambda value: 255 if value > 16 else 0, mode="1")
+    bbox = mask.getbbox()
+    return None if bbox is None else _ContentBounds(*bbox)
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:

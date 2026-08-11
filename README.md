@@ -36,10 +36,16 @@ LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_v
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
 code was checked.
 
+When `safe_area_mm` is non-zero, LABELOS also renders the artwork (or reads the PNG) and
+checks that visible, non-background marks stay inside the trim area inset by the configured
+safe area. The outer bleed and a uniform canvas/background colour are excluded; text, codes,
+logos, borders, and other marks are not. Rendering or image-reading failures are validation
+errors, so a configured safe-area check is never silently skipped.
+
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  safe-area content bounds, required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies package checksums.
