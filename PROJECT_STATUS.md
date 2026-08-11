@@ -31,13 +31,13 @@
 
 ## Verification record
 
-Verified on 2026-08-11 from code commit `40d3e7fb6029489acf1e1d924771f5e32bf5231a`:
+Verified on 2026-08-11 from code commit `f20cbd967e3d0627bfdc2b088be1c2b1da409b41`:
 
 ```text
-python3 -m pytest -q                      # 13 passed
+python3 -m pytest -q                      # 14 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos          # passed
-python3 -m build --outdir /tmp/labelos-build-safe-area
+python3 -m build --outdir /tmp/labelos-build-pdf-errors
                                           # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
 python3 -m labelos.cli package examples/label.json /tmp/labelos-safe-area-e2e --json
@@ -45,17 +45,16 @@ python3 -m labelos.cli verify-package /tmp/labelos-safe-area-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: all 13 tests passed; Ruff and compilation passed; the sdist and wheel were built in
-`/tmp/labelos-build-safe-area`; and the end-to-end package was created and checksum-verified at
+Results: all 14 tests passed; Ruff and compilation passed; the sdist and wheel were built in
+`/tmp/labelos-build-pdf-errors`; and the end-to-end package was created and checksum-verified at
 `/tmp/labelos-safe-area-e2e`. The successful CLI report includes the `safe-area` check; the
 new regression coverage verifies passing PNG and failing SVG/PDF artwork, plus fail-closed
-handling of unsupported SVG paths. `doctor` confirmed PyMuPDF and ZXing-C++ are available;
-Callas pdfToolbox remains unavailable. QR and Code 128 regression tests generate raster, SVG,
-and PDF fixtures and verify their decoded expected values. GitHub Actions runs tests, lint, and
-builds on Python 3.10 and 3.12.
+handling of unsupported SVG paths and a structured `PDF_INVALID` result for corrupt PDF input.
+`doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
+QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their decoded
+expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
 
 ## Next software priority
 
-Convert malformed PDF reader errors into structured `PDF_INVALID` reports so CLI operators do
-not receive a traceback for corrupt artwork. Then harden release-package verification with a
-canonical spec, byte counts, report-pass checks, and traversal/symlink rejection.
+Harden release-package verification with a canonical spec, byte counts, report-pass checks, and
+traversal/symlink rejection.

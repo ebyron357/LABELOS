@@ -41,6 +41,10 @@ and PDF text/images/vector drawings that extend beyond the trim inset. Unsupport
 transforms, visual primitives, and missing or malformed SVG view boxes fail closed as
 `SAFE_AREA_UNCHECKABLE`.
 
+Unreadable or malformed PDF input is reported as `PDF_INVALID` in the validation report (and
+returns the normal validation failure exit code), rather than causing an operator-facing
+traceback.
+
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
