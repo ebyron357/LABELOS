@@ -30,19 +30,22 @@ The configuration is JSON:
 }
 ```
 
-Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
-and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
-`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. With a
+3 mm bleed and 2 mm safe area, all visible artwork must stay within the inset 100 × 50 mm
+safe region. SVG and PDF artwork are rendered at 300 DPI for safe-area and code inspection;
+PNGs are inspected directly. An input that cannot be rendered or inspected fails validation
+rather than silently skipping the check. If `barcode_value` or `qr_value` is configured but
+the decoder cannot load, validation also fails rather than asserting a code was checked.
 
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  safe-area bounds, required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+  report, canonical label specification, and a SHA-256 manifest. Existing package
+  destinations are never overwritten.
+- `labelos verify-package DESTINATION`: verifies checksums, byte counts, regular-file paths,
+  report/spec consistency, and the recorded passing validation state.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
