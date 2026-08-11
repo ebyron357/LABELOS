@@ -12,6 +12,9 @@
 - Immutable-style release directories containing copied artwork, validation report, manifest,
   and SHA-256 checksums.
 - Passing and failing fixture coverage plus CLI/package regression tests.
+- Safe-area validation fails closed when visible PNG pixels, supported SVG content, or PDF
+  text/image/vector bounds enter the trim margin. SVG transforms and malformed viewBoxes are
+  reported as uncheckable errors rather than silently skipped.
 
 ## Known external/human blockers
 
@@ -29,19 +32,21 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-11 from the safe-area validation change:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 12 passed
 python3 -m ruff check .                   # passed
-python3 -m build                          # sdist and wheel created in dist/
+python3 -m compileall -q labelos          # passed
+python3 -m build --outdir /tmp/labelos-build # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
 python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
 python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
+Results: 12 tests passed; Ruff and bytecode compilation passed; the sdist and wheel were
+generated in `/tmp/labelos-build`; and the
 end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their

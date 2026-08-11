@@ -39,7 +39,9 @@ code was checked.
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  required copy, safe-area clearance, and configured barcode/QR values. PNG checks visible
+  pixels; SVG checks text anchors, images, and non-white rectangles (transforms fail closed);
+  PDF checks text, image, and vector bounds.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies package checksums.
@@ -52,3 +54,6 @@ The core validator provides reproducible local checks and package integrity. Com
 prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
 and a Callas adapter are not present in this repository; they must be supplied and approved
 by the appropriate owner before a particular label can be certified for print.
+
+SVG safe-area checking requires a numeric four-value `viewBox` and direct, untransformed
+geometry. Convert complex or transformed SVG artwork to PDF before validation.

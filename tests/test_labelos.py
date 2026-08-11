@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -50,6 +51,65 @@ def test_dimension_mismatch_fails():
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
     )
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def test_svg_safe_area_violation_fails(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">'
+        '<rect x="0" y="10" width="10" height="10"/></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[-1].code == "SAFE_AREA_VIOLATION"
+
+
+def test_png_safe_area_accepts_white_margin(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = qrcode.make("safe-area").convert("RGBA")
+    canvas = Image.new("RGBA", (300, 300), "white")
+    canvas.paste(image.resize((180, 180)), (60, 60))
+    canvas.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 100,
+            "safe_area_mm": 20,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_pdf_safe_area_violation_fails(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(pymupdf.Rect(0, 10, 20, 30), color=(0, 0, 0), fill=(0, 0, 0))
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
 
 
 def test_package_contains_verified_manifest(tmp_path):

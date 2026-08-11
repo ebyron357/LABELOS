@@ -7,6 +7,7 @@ import struct
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
+from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
 
@@ -31,6 +32,7 @@ def validate(spec: LabelSpec) -> Report:
         return report
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
+    _validate_safe_area(spec, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
@@ -152,6 +154,153 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
     for value in spec.required_copy:
         if value not in text:
             report.add("REQUIRED_COPY_MISSING", "error", f"Required copy not found: {value!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure visible content does not enter the trim-safe exclusion zone."""
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    suffix = spec.artwork.suffix.lower()
+    if suffix == ".png":
+        _validate_png_safe_area(spec, report)
+    elif suffix == ".svg":
+        _validate_svg_safe_area(spec, report)
+    elif suffix == ".pdf":
+        _validate_pdf_safe_area(spec, report)
+
+
+def _safe_bounds(spec: LabelSpec) -> tuple[float, float, float, float]:
+    left = spec.bleed_mm + spec.safe_area_mm
+    top = spec.bleed_mm + spec.safe_area_mm
+    return left, top, spec.width_mm + spec.bleed_mm - spec.safe_area_mm, spec.height_mm + spec.bleed_mm - spec.safe_area_mm
+
+
+def _outside_safe_area(bounds: tuple[float, float, float, float], spec: LabelSpec) -> bool:
+    left, top, right, bottom = _safe_bounds(spec)
+    x0, y0, x1, y1 = bounds
+    return x0 < left - 0.1 or y0 < top - 0.1 or x1 > right + 0.1 or y1 > bottom + 0.1
+
+
+def _safe_area_error(report: Report, detail: str) -> None:
+    report.add("SAFE_AREA_VIOLATION", "error", f"Visible artwork enters the safe-area exclusion zone: {detail}")
+
+
+def _validate_png_safe_area(spec: LabelSpec, report: Report) -> None:
+    try:
+        from PIL import Image
+
+        with Image.open(spec.artwork) as image:
+            rgba = image.convert("RGBA")
+            width, height = rgba.size
+            left, top, right, bottom = _safe_bounds(spec)
+            total_width = spec.width_mm + 2 * spec.bleed_mm
+            total_height = spec.height_mm + 2 * spec.bleed_mm
+            safe_pixels = (
+                left / total_width * width,
+                top / total_height * height,
+                right / total_width * width,
+                bottom / total_height * height,
+            )
+            for y in range(height):
+                for x in range(width):
+                    red, green, blue, alpha = rgba.getpixel((x, y))
+                    if (
+                        alpha
+                        and (red, green, blue) != (255, 255, 255)
+                        and (x < safe_pixels[0] or y < safe_pixels[1] or x >= safe_pixels[2] or y >= safe_pixels[3])
+                    ):
+                        _safe_area_error(report, f"non-white pixel at {x},{y}")
+                        return
+    except (ImportError, OSError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect PNG safe area: {error}")
+
+
+def _validate_svg_safe_area(spec: LabelSpec, report: Report) -> None:
+    try:
+        root = ElementTree.parse(spec.artwork).getroot()
+    except ElementTree.ParseError as error:
+        report.add("SVG_INVALID", "error", f"Invalid SVG XML: {error}")
+        return
+    view_box = root.get("viewBox", "").replace(",", " ").split()
+    if len(view_box) != 4:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", "SVG safe-area validation requires a four-value viewBox")
+        return
+    try:
+        view_x, view_y, view_width, view_height = (float(value) for value in view_box)
+    except ValueError:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", "SVG viewBox must contain numeric values")
+        return
+    if view_width <= 0 or view_height <= 0:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", "SVG viewBox dimensions must be positive")
+        return
+    if any("transform" in element.attrib for element in root.iter()):
+        report.add("SAFE_AREA_UNCHECKABLE", "error", "SVG transforms are not supported for safe-area validation")
+        return
+    physical_width = spec.width_mm + 2 * spec.bleed_mm
+    physical_height = spec.height_mm + 2 * spec.bleed_mm
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1]
+        if tag not in {"text", "image", "rect"}:
+            continue
+        if tag == "rect" and element.get("fill", "").lower() in {"white", "#fff", "#ffffff"}:
+            continue
+        try:
+            x = float(element.get("x", "0"))
+            y = float(element.get("y", "0"))
+            width = float(element.get("width", "0"))
+            height = float(element.get("height", "0"))
+        except ValueError:
+            report.add("SAFE_AREA_UNCHECKABLE", "error", f"SVG {tag} has non-numeric bounds")
+            return
+        if tag == "text":
+            if "x" not in element.attrib or "y" not in element.attrib:
+                report.add("SAFE_AREA_UNCHECKABLE", "error", "SVG text must provide x and y coordinates")
+                return
+            bounds = (
+                (x - view_x) / view_width * physical_width,
+                (y - view_y) / view_height * physical_height,
+                (x - view_x) / view_width * physical_width,
+                (y - view_y) / view_height * physical_height,
+            )
+            if _outside_safe_area(bounds, spec):
+                _safe_area_error(report, "SVG text anchor")
+                return
+            continue
+        bounds = (
+            (x - view_x) / view_width * physical_width,
+            (y - view_y) / view_height * physical_height,
+            (x + width - view_x) / view_width * physical_width,
+            (y + height - view_y) / view_height * physical_height,
+        )
+        if _outside_safe_area(bounds, spec):
+            _safe_area_error(report, f"SVG {tag}")
+            return
+
+
+def _validate_pdf_safe_area(spec: LabelSpec, report: Report) -> None:
+    try:
+        import pymupdf
+
+        document = pymupdf.open(spec.artwork)
+        try:
+            if document.page_count != 1:
+                return
+            page = document[0]
+            candidates = [block["bbox"] for block in page.get_text("dict")["blocks"] if "bbox" in block]
+            for image in page.get_images(full=True):
+                candidates.extend((rect.x0, rect.y0, rect.x1, rect.y1) for rect in page.get_image_rects(image[0]))
+            candidates.extend((drawing["rect"].x0, drawing["rect"].y0, drawing["rect"].x1, drawing["rect"].y1) for drawing in page.get_drawings())
+            for x0, y0, x1, y1 in candidates:
+                if _outside_safe_area(
+                    (x0 * MM_PER_POINT, y0 * MM_PER_POINT, x1 * MM_PER_POINT, y1 * MM_PER_POINT), spec
+                ):
+                    _safe_area_error(report, "PDF text, image, or vector")
+                    return
+        finally:
+            document.close()
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect PDF safe area: {error}")
 
 
 def _validate_codes(spec: LabelSpec, report: Report) -> None:
