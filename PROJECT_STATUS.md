@@ -29,7 +29,7 @@
 
 ## Verification record
 
-Verified on 2026-08-11 from the current production-readiness branch:
+Verified on 2026-08-11 for production code commit `448deca822d11e1899394357e7d9de7c04189de6`:
 
 ```text
 python3 -m pytest -q                      # 14 passed
