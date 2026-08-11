@@ -8,9 +8,11 @@
 - QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
+- Rendered safe-area enforcement for PNG, SVG, and PDF artwork, including transformed SVG
+  content, SVG text, malformed SVG/PDF handling, and rotated PDFs.
 - Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+- Immutable-style release directories containing copied artwork, `label-spec.json`,
+  validation report, manifest, SHA-256 checksums, and byte counts.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,20 +31,23 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-11 from commit `feat: harden safe-area and package verification`:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 22 passed
 python3 -m ruff check .                   # passed
-python3 -m build                          # sdist and wheel created in dist/
+python3 -m compileall -q labelos          # passed
+python3 -m build --outdir /tmp/labelos-build
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-audit --json
+python3 -m labelos.cli verify-package /tmp/labelos-e2e-audit --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 22 tests passed; Ruff and bytecode compilation passed; the sdist and wheel were
+generated in `/tmp/labelos-build`; and the end-to-end package was created and checksum-verified
+at `/tmp/labelos-e2e-audit`. Release verification rejects unsafe paths, symlinks, checksum and
+byte-count mismatches, and non-passing validation metadata.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
