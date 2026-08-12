@@ -1,9 +1,10 @@
 # Render Blueprint for LABELOS API
 # https://render.com/docs/blueprint-spec
 #
-# After push: open Render Dashboard → New → Blueprint → select this repo/branch.
-# Set LABELOS_API_TOKEN in the dashboard (sync: false).
-# Persistent disk keeps releases/jobs across deploys.
+# Deploy: Render Dashboard → New → Blueprint → select ebyron357/LABELOS
+# (branch feat/production-label-automation until merged).
+# Set LABELOS_API_TOKEN in the dashboard when prompted (sync: false).
+# Persistent disk keeps releases/jobs across deploys (requires paid plan).
 
 services:
   - type: web
@@ -12,7 +13,8 @@ services:
     plan: starter
     region: oregon
     branch: feat/production-label-automation
-    buildCommand: pip install -e .
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install .
     startCommand: labelos-api
     healthCheckPath: /health
     envVars:
@@ -22,8 +24,7 @@ services:
         value: /var/data/storage
       - key: LABELOS_API_HOST
         value: 0.0.0.0
-      - key: LABELOS_API_PORT
-        value: "8080"
+      # Do not set LABELOS_API_PORT. Bind to Render-injected PORT (default 10000).
       - key: LABELOS_LOG_LEVEL
         value: INFO
       - key: PYTHON_VERSION

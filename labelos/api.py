@@ -365,11 +365,16 @@ def create_app(service: ProductionService | None = None) -> FastAPI:
 app = create_app()
 
 
+def resolve_listen_port() -> int:
+    """Prefer platform PORT (Render) over LABELOS_API_PORT for public HTTP binding."""
+    return int(os.environ.get("PORT") or os.environ.get("LABELOS_API_PORT", "8080"))
+
+
 def main() -> None:
     import uvicorn
 
     host = os.environ.get("LABELOS_API_HOST", "0.0.0.0")
-    port = int(os.environ.get("LABELOS_API_PORT", "8080"))
+    port = resolve_listen_port()
     # Touch token early so misconfiguration fails closed at startup.
     _api_token()
     log_event(operation="api.start", status="ok", host=host, port=port)

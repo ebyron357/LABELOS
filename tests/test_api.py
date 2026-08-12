@@ -53,6 +53,16 @@ def test_health_is_public(api_env):
     assert body["status"] == "ok"
 
 
+def test_listen_port_prefers_platform_port(monkeypatch):
+    from labelos.api import resolve_listen_port
+
+    monkeypatch.setenv("PORT", "10000")
+    monkeypatch.setenv("LABELOS_API_PORT", "8080")
+    assert resolve_listen_port() == 10000
+    monkeypatch.delenv("PORT")
+    assert resolve_listen_port() == 8080
+
+
 def test_doctor_requires_auth(api_env):
     client, token, _, _ = api_env
     assert client.get("/doctor").status_code == 401
