@@ -1,54 +1,61 @@
 # LABELOS
 
-LABELOS validates packaging-label artwork before it is released to production and creates
-checksummed release packages. It deliberately fails closed: an unavailable required decoder
-or an invalid artwork check prevents packaging.
+LABELOS validates packaging-label artwork before production release, creates checksummed
+immutable packages, and exposes an authenticated HTTP API for n8n orchestration.
+
+Illustrator automation runs on a controlled workstation bridge — not as an unsupported
+headless cloud process.
 
 ## Quick start
 
 ```bash
-python -m pip install -e .
-labelos validate examples/label.json
-labelos package examples/label.json dist/example-label
-labelos verify-package dist/example-label
-labelos doctor
+python -m pip install -e ".[test,dev]"
+labelos validate examples/label.json --json
+labelos package examples/label.json storage/demo-release
+labelos verify-package storage/demo-release
+labelos doctor --json
 ```
 
-The configuration is JSON:
+## HTTP API
 
-```json
-{
-  "artwork": "label.pdf",
-  "width_mm": 100,
-  "height_mm": 50,
-  "bleed_mm": 3,
-  "safe_area_mm": 2,
-  "min_dpi": 300,
-  "required_copy": ["Product name", "NET 250 g"],
-  "barcode_value": "0123456789012",
-  "qr_value": "https://example.com/product"
-}
+```bash
+set LABELOS_API_TOKEN=dev-secret
+set LABELOS_STORAGE_PATH=%CD%\storage
+labelos-api
 ```
 
-Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
-and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
-`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+```text
+GET  /health
+GET  /doctor
+POST /validate
+POST /package
+POST /verify-package
+POST /jobs
+GET  /jobs/{job_id}
+```
 
-## Commands
+See [docs/api.md](docs/api.md).
 
-- `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
-- `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
-- `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
-  reported as unavailable until a real adapter and licensed profile are configured.
+## Documentation
 
-## Current scope and limitations
+| Topic | Doc |
+| --- | --- |
+| Architecture | [docs/architecture.md](docs/architecture.md) |
+| Local development | [docs/local-development.md](docs/local-development.md) |
+| Deployment | [docs/deployment.md](docs/deployment.md) |
+| n8n | [docs/n8n-configuration.md](docs/n8n-configuration.md) |
+| Illustrator setup | [docs/illustrator-setup.md](docs/illustrator-setup.md) |
+| Template standard | [docs/illustrator-template-standard.md](docs/illustrator-template-standard.md) |
+| Product schema | [docs/product-data-schema.md](docs/product-data-schema.md) |
+| Revisions | [docs/revision-workflow.md](docs/revision-workflow.md) |
+| Printer profiles | [docs/printer-profiles.md](docs/printer-profiles.md) |
+| Security | [docs/security.md](docs/security.md) |
+| Backup | [docs/backup-recovery.md](docs/backup-recovery.md) |
+| Acceptance | [docs/acceptance-testing.md](docs/acceptance-testing.md) |
+| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 
-The core validator provides reproducible local checks and package integrity. Commercial
-prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
-and a Callas adapter are not present in this repository; they must be supplied and approved
-by the appropriate owner before a particular label can be certified for print.
+## Current scope
+
+The core validator remains fail-closed. Commercial Callas preflight, approved regulatory copy,
+brand `.ai` templates, and printer ICC targets must be supplied by owners before a SKU can be
+certified for print. See [PROJECT_STATUS.md](PROJECT_STATUS.md).

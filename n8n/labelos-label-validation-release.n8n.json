@@ -1,0 +1,269 @@
+{
+  "name": "LABELOS Label Validation & Release",
+  "active": false,
+  "id": "6CwUVmFDLQbzdNBd",
+  "nodes": [
+    {
+      "id": "trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {}
+    },
+    {
+      "id": "set-inputs",
+      "name": "Runtime Inputs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 300],
+      "parameters": {
+        "keepOnlySet": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "sku",
+              "type": "string",
+              "value": "ALT-SYR-MANGO-001"
+            },
+            {
+              "id": "a2",
+              "name": "revision",
+              "type": "string",
+              "value": "1.0"
+            },
+            {
+              "id": "a3",
+              "name": "config",
+              "type": "object",
+              "value": {}
+            },
+            {
+              "id": "a4",
+              "name": "requireHumanApproval",
+              "type": "boolean",
+              "value": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "doctor",
+      "name": "LABELOS Doctor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.LABELOS_API_BASE_URL || $vars.LABELOS_API_BASE_URL) + '/doctor' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "notes": "REAL: Replace any mocked doctor response with this authenticated call."
+    },
+    {
+      "id": "validate",
+      "name": "LABELOS Validate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LABELOS_API_BASE_URL || $vars.LABELOS_API_BASE_URL) + '/validate' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ config: $('Runtime Inputs').first().json.config }) }}",
+        "options": {}
+      },
+      "notes": "REAL: Uses structured result.overall / result.failed — do not parse prose."
+    },
+    {
+      "id": "gate-validation",
+      "name": "Gate Validation Pass",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success === true && $json.result && $json.result.overall === 'PASS' }}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "reject-validation",
+      "name": "Stop Rejected Validation",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1380, 480],
+      "parameters": {
+        "errorMessage": "REJECTED_VALIDATION — packaging blocked"
+      }
+    },
+    {
+      "id": "package",
+      "name": "LABELOS Package",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LABELOS_API_BASE_URL || $vars.LABELOS_API_BASE_URL) + '/package' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ config: $('Runtime Inputs').first().json.config, destination: 'adhoc/' + $('Runtime Inputs').first().json.sku + '-' + $('Runtime Inputs').first().json.revision }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "verify",
+      "name": "LABELOS Verify Package",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LABELOS_API_BASE_URL || $vars.LABELOS_API_BASE_URL) + '/verify-package' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ destination: $('LABELOS Package').first().json.result.package_path }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "gate-verify",
+      "name": "Gate Package Verified",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1860, 200],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success === true }}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "reject-package",
+      "name": "Stop Package Verification Failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [2100, 360],
+      "parameters": {
+        "errorMessage": "PACKAGE_VERIFICATION_FAILED — release blocked"
+      }
+    },
+    {
+      "id": "await-approval",
+      "name": "Await Human Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2100, 120],
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      },
+      "notes": "PLACEHOLDER channel: wire to real Slack/Email approval. Approval must include artwork checksum."
+    },
+    {
+      "id": "registry-note",
+      "name": "Release Registry Note",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2340, 120],
+      "parameters": {
+        "keepOnlySet": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "registry_table",
+              "type": "string",
+              "value": "labelos_release_registry"
+            },
+            {
+              "id": "r2",
+              "name": "status",
+              "type": "string",
+              "value": "AWAITING_REGISTRY_WRITE"
+            },
+            {
+              "id": "r3",
+              "name": "note",
+              "type": "string",
+              "value": "Write job_id, sku, revision, package checksum, and final_status into labelos_release_registry after approval."
+            }
+          ]
+        }
+      },
+      "notes": "PLACEHOLDER: connect Data Table node for labelos_release_registry."
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Runtime Inputs", "type": "main", "index": 0 }]]
+    },
+    "Runtime Inputs": {
+      "main": [[{ "node": "LABELOS Doctor", "type": "main", "index": 0 }]]
+    },
+    "LABELOS Doctor": {
+      "main": [[{ "node": "LABELOS Validate", "type": "main", "index": 0 }]]
+    },
+    "LABELOS Validate": {
+      "main": [[{ "node": "Gate Validation Pass", "type": "main", "index": 0 }]]
+    },
+    "Gate Validation Pass": {
+      "main": [
+        [{ "node": "LABELOS Package", "type": "main", "index": 0 }],
+        [{ "node": "Stop Rejected Validation", "type": "main", "index": 0 }]
+      ]
+    },
+    "LABELOS Package": {
+      "main": [[{ "node": "LABELOS Verify Package", "type": "main", "index": 0 }]]
+    },
+    "LABELOS Verify Package": {
+      "main": [[{ "node": "Gate Package Verified", "type": "main", "index": 0 }]]
+    },
+    "Gate Package Verified": {
+      "main": [
+        [{ "node": "Await Human Approval", "type": "main", "index": 0 }],
+        [{ "node": "Stop Package Verification Failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Await Human Approval": {
+      "main": [[{ "node": "Release Registry Note", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Scaffold for workflow 6CwUVmFDLQbzdNBd. Attach Bearer credential mapping Authorization to LABELOS API Token. Set LABELOS_API_BASE_URL. Replace mocks in the live cloud workflow with these HTTP nodes."
+  }
+}
