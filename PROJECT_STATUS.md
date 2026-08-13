@@ -1,48 +1,36 @@
 # Production readiness status
 
-## Implemented
+## Current state (before this branch)
 
-- JSON label specification validation with physical dimensions, bleed, safe-area sanity,
-  minimum DPI, and required-copy fields.
-- SVG, PNG, and PDF artwork validation through bundled PyMuPDF.
-- QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
-  rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
-  whenever code validation is requested.
-- Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
-- Passing and failing fixture coverage plus CLI/package regression tests.
+Canonical LABELOS validator CLI on `main` (`1e86abd`):
+`validate`, `package`, `verify-package`, `doctor` with SVG/PNG/PDF, DPI, bleed, copy, QR/barcode,
+fail-closed packaging, and SHA-256 manifests. No HTTP API, Illustrator bridge, or durable job store.
 
-## Known external/human blockers
+## Implemented on branch `feat/production-label-automation`
 
-- **TOOL UNAVAILABLE/BLOCKED:** Callas pdfToolbox is not installed or configured. No Callas
-  preflight/profile result is claimed.
-- No approved production artwork, regulatory-copy source, printer ICC/color target, or
-  prepress acceptance profile is in this repository. The software can validate supplied
-  specifications, but cannot certify these absent requirements.
-
-## Next operator steps
-
-1. Add approved product specs and both passing/failing artwork fixtures for every SKU.
-2. Add the licensed Callas adapter/profile when the printer supplies its preflight target.
-3. Run the full verification commands recorded below for each release.
+| Area | Status |
+| --- | --- |
+| LABELOS HTTP API | IMPLEMENTED + TESTED |
+| Bearer auth | IMPLEMENTED + TESTED |
+| Durable local storage + jobs/audit/idempotency | IMPLEMENTED + TESTED |
+| Approval checksum gating | IMPLEMENTED + TESTED |
+| Illustrator bridge + ExtendScript + template docs | IMPLEMENTED; live COM BLOCKED without workstation |
+| Bridge dry-run + E2E defect gating (dims/copy/QR/barcode/DPI/corrupt) | IMPLEMENTED + TESTED |
+| n8n workflow scaffold `6CwUVmFDLQbzdNBd` | IMPLEMENTED (cloud cutover pending deploy) |
+| Dockerfile / compose / `render.yaml` | IMPLEMENTED |
+| Public deploy / `LABELOS_API_BASE_URL` | NOT DEPLOYED (needs Render/dashboard + secret) |
+| Callas / printer profiles / operator UI | PLACEHOLDER / NOT STARTED |
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
-
 ```text
-python3 -m pytest                         # 9 passed
-python3 -m ruff check .                   # passed
-python3 -m build                          # sdist and wheel created in dist/
-python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
-python3 -m labelos.cli doctor --json
+python -m pip install -e ".[test,dev]"
+python -m pytest -q          # 32 passed
+python -m ruff check labelos illustrator_bridge tests
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
-`doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
-QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+## Exact next action
+
+1. Push this branch and create a Render Blueprint service from `render.yaml`
+2. Set `LABELOS_API_TOKEN` in Render
+3. Point n8n `LABELOS_API_BASE_URL` at the service and replace mocked LABELOS nodes

@@ -1,0 +1,35 @@
+{
+  "product": {
+    "brand": "ALTERNATIVE",
+    "name": "Mango Syrup",
+    "sku": "ALT-SYR-MANGO-001",
+    "revision": "1.0"
+  },
+  "label": {
+    "template": "alternative-syrup.ai",
+    "width_mm": 100,
+    "height_mm": 50,
+    "bleed_mm": 3,
+    "safe_area_mm": 2,
+    "min_dpi": 300
+  },
+  "copy": {
+    "product_name": "Example Product",
+    "flavor": "Mango",
+    "net_weight": "NET 250 g",
+    "ingredients": "Mango puree, cane sugar, water, citric acid",
+    "legal_copy": [
+      "For food manufacturing use",
+      "Store in a cool dry place"
+    ],
+    "nutrition_panel": null,
+    "lot_area": "LOT ______"
+  },
+  "codes": {
+    "barcode": "0123456789012",
+    "qr": "https://example.com/product/ALT-SYR-MANGO-001"
+  },
+  "printer": {
+    "profile": null
+  }
+}
