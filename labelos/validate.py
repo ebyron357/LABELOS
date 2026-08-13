@@ -8,6 +8,7 @@ from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
+from .evidence import validate_native_evidence
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
@@ -32,6 +33,8 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    if spec.native_evidence is not None:
+        validate_native_evidence(spec.native_evidence, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,

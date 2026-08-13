@@ -165,3 +165,126 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+NATIVE_LAYERS = [
+    "DIELINE",
+    "BLEED",
+    "SAFE_AREA",
+    "BACKGROUND",
+    "BRAND",
+    "COPY",
+    "REGULATORY",
+    "BARCODE",
+    "QR",
+    "VARNISH",
+]
+
+
+def write_native_evidence(tmp_path: Path, **overrides) -> dict:
+    directory = tmp_path / "evidence"
+    directory.mkdir(exist_ok=True)
+    payload = {
+        "missing_layers": [],
+        "layers": list(NATIVE_LAYERS),
+        "objects": ["BT-1000-30ML_QR", "BT-1000-30ML_BARCODE"],
+        "reopened_without_repair": True,
+    }
+    payload.update(overrides.pop("payload", {}))
+    (directory / "evidence.json").write_text(json.dumps(payload), encoding="utf-8")
+    (directory / "build.log").write_text(overrides.pop("log", "build started\nPASSED\n"), encoding="utf-8")
+    (directory / "preview.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+    (directory / "master.ai").write_bytes(b"%PDF-1.5 native placeholder")
+    return {
+        "evidence_json": str(directory / "evidence.json"),
+        "log": str(directory / "build.log"),
+        "preview_png": str(directory / "preview.png"),
+        "native_artwork": str(directory / "master.ai"),
+        "required_layers": NATIVE_LAYERS,
+        "required_objects": ["BT-1000-30ML_QR", "BT-1000-30ML_BARCODE"],
+    }
+
+
+def spec_with_evidence(tmp_path: Path, **overrides) -> LabelSpec:
+    return LabelSpec.from_dict(
+        {
+            "artwork": str(ROOT / "fixtures/passing-label.svg"),
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "native_evidence": write_native_evidence(tmp_path, **overrides),
+        },
+        tmp_path,
+    )
+
+
+def test_native_evidence_gate_passes(tmp_path):
+    report = validate(spec_with_evidence(tmp_path))
+    assert report.passed
+    assert "native-build-evidence" in report.checks
+    assert report.metadata["native_evidence"]["missing_layers"] == []
+    assert report.metadata["native_evidence"]["blocked"] == [
+        "printer_profile",
+        "icc_profile",
+        "regulatory_approval",
+        "production_pdf",
+    ]
+
+
+def test_native_evidence_reports_missing_layers(tmp_path):
+    report = validate(spec_with_evidence(tmp_path, payload={"missing_layers": ["VARNISH"]}))
+    assert not report.passed
+    assert any(issue.code == "NATIVE_LAYERS_MISSING" for issue in report.issues)
+
+
+def test_native_evidence_requires_all_ten_layers(tmp_path):
+    report = validate(spec_with_evidence(tmp_path, payload={"layers": NATIVE_LAYERS[:9]}))
+    assert any(
+        issue.code == "NATIVE_LAYERS_MISSING" and "VARNISH" in issue.message
+        for issue in report.issues
+    )
+
+
+def test_native_evidence_requires_named_objects(tmp_path):
+    report = validate(spec_with_evidence(tmp_path, payload={"objects": []}))
+    assert any(issue.code == "NAMED_OBJECTS_MISSING" for issue in report.issues)
+
+
+def test_native_evidence_requires_repair_free_reopen(tmp_path):
+    report = validate(spec_with_evidence(tmp_path, payload={"reopened_without_repair": False}))
+    assert any(issue.code == "NATIVE_REOPEN_UNPROVEN" for issue in report.issues)
+
+
+def test_native_evidence_requires_log_to_end_with_passed(tmp_path):
+    report = validate(spec_with_evidence(tmp_path, log="build started\nFAILED\n"))
+    assert any(issue.code == "EVIDENCE_LOG_NOT_PASSED" for issue in report.issues)
+
+
+def test_native_evidence_requires_every_artifact(tmp_path):
+    spec = spec_with_evidence(tmp_path)
+    spec.native_evidence.preview_png.unlink()
+    report = validate(spec)
+    assert any(issue.code == "EVIDENCE_ARTIFACT_MISSING" for issue in report.issues)
+
+
+def test_package_records_and_verifies_native_evidence(tmp_path):
+    spec = spec_with_evidence(tmp_path)
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(manifest["native_evidence"]) == {
+        "evidence_json",
+        "log",
+        "preview_png",
+        "native_artwork",
+    }
+    assert manifest["blocked_requirements"] == [
+        "printer_profile",
+        "icc_profile",
+        "regulatory_approval",
+        "production_pdf",
+    ]
+    assert not verify_package(manifest_path.parent)
+    (manifest_path.parent / "native-evidence" / "master.ai").write_bytes(b"tampered")
+    assert verify_package(manifest_path.parent) == [
+        "native evidence native_artwork checksum mismatch: master.ai"
+    ]

@@ -36,6 +36,34 @@ LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_v
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
 code was checked.
 
+### Native Illustrator build evidence
+
+An Illustrator builder (for example `BravoPaws_Bacon_Tincture_Build.jsx`) that emits proof
+artifacts can be gated by adding an optional `native_evidence` block to the configuration:
+
+```json
+{
+  "native_evidence": {
+    "evidence_json": "proof/BT-1000-30ML.evidence.json",
+    "log": "proof/BT-1000-30ML.log",
+    "preview_png": "proof/BT-1000-30ML.png",
+    "native_artwork": "proof/BT-1000-30ML.ai",
+    "required_layers": ["DIELINE", "BLEED", "SAFE_AREA", "BACKGROUND", "BRAND", "COPY", "REGULATORY", "BARCODE", "QR", "VARNISH"],
+    "required_objects": ["BT-1000-30ML_QR", "BT-1000-30ML_BARCODE"]
+  }
+}
+```
+
+The evidence JSON must be an object containing `missing_layers` (empty), `layers` covering
+every `required_layers` entry, `objects` covering every `required_objects` entry, and
+`reopened_without_repair: true`. The log must end with `PASSED`, and all four artifacts must
+exist. Any failure is a validation error, so packaging is refused. Packaging copies the four
+artifacts into `native-evidence/` with SHA-256 entries in the manifest, and
+`verify-package` re-checks them.
+
+LABELOS records the evidence, it does not produce it: the artifacts must come from a real
+Illustrator run on an operator workstation.
+
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
@@ -52,3 +80,7 @@ The core validator provides reproducible local checks and package integrity. Com
 prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
 and a Callas adapter are not present in this repository; they must be supplied and approved
 by the appropriate owner before a particular label can be certified for print.
+
+Every package manifest lists `blocked_requirements`: `printer_profile`, `icc_profile`,
+`regulatory_approval`, and `production_pdf`. LABELOS never generates PDF/X-1a output and a
+passing native-evidence gate does not clear any of those blockers.

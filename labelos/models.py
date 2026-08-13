@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .evidence import NativeEvidence
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -51,6 +53,7 @@ class LabelSpec:
     required_copy: tuple[str, ...] = ()
     barcode_value: str | None = None
     qr_value: str | None = None
+    native_evidence: NativeEvidence | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], root: Path) -> LabelSpec:
@@ -73,8 +76,12 @@ class LabelSpec:
         min_dpi = int(data.get("min_dpi", 300))
         if min_dpi <= 0:
             raise ValueError("min_dpi must be positive")
+        native_evidence = data.get("native_evidence")
         return cls(
             artwork=artwork,
+            native_evidence=(
+                NativeEvidence.from_dict(native_evidence, root) if native_evidence is not None else None
+            ),
             width_mm=width,
             height_mm=height,
             min_dpi=min_dpi,

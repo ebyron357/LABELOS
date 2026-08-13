@@ -11,12 +11,22 @@
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
   and SHA-256 checksums.
+- Optional native Illustrator build evidence gate (`native_evidence`): requires empty
+  `missing_layers`, every required native layer, every required named object, a
+  repair-free reopen claim, a preview PNG, a JSON evidence file, and a log ending in
+  `PASSED`. Evidence artifacts are copied into the package with SHA-256 entries and are
+  re-verified by `verify-package`.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
 
 - **TOOL UNAVAILABLE/BLOCKED:** Callas pdfToolbox is not installed or configured. No Callas
   preflight/profile result is claimed.
+- **HUMAN/HARDWARE REQUIRED:** the Illustrator run itself (open stable Illustrator 2026,
+  File → Scripts → Other Script…, run the builder) cannot be performed by this repository or
+  its CI. LABELOS only accepts or rejects the evidence an operator captures.
+- **BLOCKED:** printer profile, ICC profile, regulatory approval, and production PDF. Every
+  manifest records these under `blocked_requirements`; no PDF/X-1a is produced.
 - No approved production artwork, regulatory-copy source, printer ICC/color target, or
   prepress acceptance profile is in this repository. The software can validate supplied
   specifications, but cannot certify these absent requirements.
