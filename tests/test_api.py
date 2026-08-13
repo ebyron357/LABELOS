@@ -237,7 +237,7 @@ def test_job_package_verify_approve_release(api_env):
             "approver": "qa.operator",
             "comments": "Looks good",
             "approved": True,
-            "artwork_checksum": job["artwork_checksum"],
+            "artwork_checksum": job["package_artwork_checksum"],
         },
     )
     assert approve.status_code == 200
