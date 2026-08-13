@@ -17,7 +17,7 @@ Product data
   → Illustrator template (bridge)
   → Artwork export
   → LABELOS POST /validate
-  → Optional Callas preflight (adapter; disabled until licensed)
+  → callas pdfToolbox preflight/fixups (real CLI adapter; NOT_CONFIGURED until licensed)
   → Human approval (checksum-bound)
   → LABELOS POST /package
   → LABELOS POST /verify-package
@@ -29,7 +29,9 @@ Product data
 
 A release is blocked unless product data is valid, artwork generation succeeded (when required),
 LABELOS validation passed, package creation succeeded, package verification passed, required
-preflight passed when enabled, and human approval is bound to the artwork checksum.
+preflight passed when required, package verification succeeded, the package is unchanged since
+verification (re-verified atomically at release), and human approval is bound to the SHA-256
+checksum of the artwork actually packaged.
 
 ## Illustrator reality
 

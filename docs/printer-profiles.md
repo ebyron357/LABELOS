@@ -11,6 +11,11 @@ The schema lives at [`profiles/printer-profile.schema.example.json`](../profiles
 
 `approved: false` profiles are never enforced.
 
+Profiles are loaded from `LABELOS_PRINTER_PROFILES_PATH`; `labelos doctor` reports the
+component as `missing` when the variable is unset or the directory is empty.
+
 ## Status
 
-**PLACEHOLDER** until an approved printer specification document is supplied.
+**EXTERNAL BLOCKER — NOT CLAIMED COMPLETE.** No approved converter/printer specification has
+been supplied, so no production profile values exist in this repository. LABELOS must not
+release a SKU that has no approved profile.

@@ -27,7 +27,10 @@ Unauthenticated liveness.
 
 ### `GET /doctor`
 
-Reports PyMuPDF, ZXing-C++, Callas adapter status.
+Reports every production dependency (core, Python, storage, API, Illustrator bridge, Adobe
+Illustrator, pdfToolbox, n8n, printer profiles, product data, production config) with one of
+`ready`, `configured`, `missing`, `unavailable`, `unhealthy`. `GET /ready` is the unauthenticated
+readiness probe and returns 503 when storage or the API token is not usable.
 
 ### `POST /validate`
 
