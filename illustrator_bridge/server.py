@@ -18,6 +18,7 @@ If Illustrator / COM is unavailable, requests fail closed with ILLUSTRATOR_ERROR
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -50,6 +51,8 @@ from labelos.security import resolve_under, sanitize_token
 SUPPORTED_EXPORT_FORMATS: frozenset[str] = frozenset({"pdf", "ai", "png"})
 
 configure_logging(os.environ.get("LABELOS_LOG_LEVEL", "INFO"))
+
+LOGGER = logging.getLogger("labelos.illustrator_bridge")
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "scripts" / "generate_label.jsx"
 
@@ -97,10 +100,13 @@ def illustrator_available() -> dict[str, Any]:
         app = win32com.client.Dispatch("Illustrator.Application")
         version = str(getattr(app, "Version", "unknown"))
         return {"available": True, "version": version, "platform": sys.platform}
-    except Exception as error:  # noqa: BLE001
+    except Exception:
+        # The COM failure detail is logged locally and deliberately not returned to
+        # clients, so bridge responses never expose internal error/stack detail.
+        LOGGER.exception("Illustrator COM automation is unavailable")
         return {
             "available": False,
-            "reason": f"Illustrator COM unavailable: {error}",
+            "reason": "Illustrator COM unavailable; see bridge logs for details",
             "platform": sys.platform,
         }
 
