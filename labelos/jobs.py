@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from .doctor import run_doctor
 from .errors import (
     APPROVAL_ERROR,
     DUPLICATE_SKIPPED,
@@ -16,12 +17,18 @@ from .errors import (
     LABEL_VALIDATION_FAILURE,
     PACKAGE_ERROR,
     PACKAGE_VERIFICATION_FAILED,
+    PREPRESS_ERROR,
     LabelosException,
 )
 from .models import LabelSpec, Report
 from .observability import log_event
 from .package import create_package, sha256_file, verify_package
-from .preflight import PreflightResult, get_preflight_adapter
+from .preflight import (
+    NOT_CONFIGURED,
+    PreflightAdapter,
+    PreflightResult,
+    get_preflight_adapter,
+)
 from .schemas.lifecycle import LIFECYCLE_TRANSITIONS, JobLifecycle
 from .schemas.product import ProductRecord, parse_product_record
 from .security import sanitize_job_id, sanitize_revision, sanitize_sku
@@ -225,9 +232,7 @@ class ProductionService:
         self.jobs = JobStore(self.storage)
 
     def doctor(self) -> dict[str, Any]:
-        from .cli import _doctor
-
-        return _doctor()
+        return run_doctor()
 
     def validate_config(self, config: dict[str, Any], *, root: Path | None = None) -> dict[str, Any]:
         work_root = root or Path.cwd()
@@ -455,19 +460,41 @@ class ProductionService:
         self.jobs.transition(job, JobLifecycle.AWAITING_APPROVAL)
         return job
 
-    def run_preflight(self, job_id: str, *, enabled: bool = False) -> dict[str, Any]:
+    def run_preflight(
+        self,
+        job_id: str,
+        *,
+        required: bool = False,
+        adapter: PreflightAdapter | None = None,
+        output_dir: Path | None = None,
+        enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Run callas pdfToolbox preflight and record the machine-readable result.
+
+        When ``required`` is true, anything other than ``PASS``/``WARNING`` fails closed.
+        ``enabled`` is the historical parameter name and remains supported.
+        """
+        if enabled is not None:
+            required = required or enabled
         job = self.jobs.get(job_id)
         artwork = job.get("config", {}).get("artwork")
-        adapter = get_preflight_adapter()
-        result: PreflightResult = adapter.run(str(artwork) if artwork else "", profile=None)
-        if enabled and not result.enabled:
-            raise LabelosException(
-                "Commercial preflight required but Callas is not configured",
-                code="PREPRESS_REQUIRED",
-                category="PREPRESS_ERROR",
-            )
+        adapter = adapter or get_preflight_adapter()
+        result: PreflightResult = adapter.run(
+            str(artwork) if artwork else "",
+            profile=None,
+            output_dir=output_dir,
+        )
         job["preflight_result"] = result.to_dict()
         self.jobs.save(job)
+        if required and result.blocking:
+            raise LabelosException(
+                f"Commercial preflight is required and returned {result.status}: {result.message}",
+                code=(
+                    "PREPRESS_REQUIRED" if result.status == NOT_CONFIGURED else "PREPRESS_FAILED"
+                ),
+                category=PREPRESS_ERROR,
+                details={"preflight": result.to_dict()},
+            )
         return job
 
     def approve(
@@ -543,6 +570,33 @@ class ProductionService:
                 "Release requires a successful package verification matching the current package",
                 code="RELEASE_VERIFICATION_REQUIRED",
                 category=PACKAGE_VERIFICATION_FAILED,
+            )
+        # Re-verify the package atomically during release: the recorded manifest checksum
+        # alone cannot detect payload files that were altered after verification.
+        package_dir = Path(job["package_path"])
+        if sha256_file(package_dir / "manifest.json") != verified_checksum:
+            raise LabelosException(
+                "Release manifest no longer matches the verified package manifest",
+                code="RELEASE_PACKAGE_TAMPERED",
+                category=PACKAGE_VERIFICATION_FAILED,
+            )
+        failures = verify_package(package_dir)
+        if failures:
+            job["errors"].append(
+                {
+                    "code": PACKAGE_VERIFICATION_FAILED,
+                    "message": "Package verification failed during release",
+                    "failures": failures,
+                }
+            )
+            job["final_status"] = PACKAGE_VERIFICATION_FAILED
+            job["package_verified_manifest_checksum"] = None
+            self.jobs.save(job)
+            raise LabelosException(
+                "Release package failed re-verification",
+                code="RELEASE_PACKAGE_TAMPERED",
+                category=PACKAGE_VERIFICATION_FAILED,
+                details={"failures": failures},
             )
         approval = job.get("approval_result") or {}
         if not approval.get("approved"):

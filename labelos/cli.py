@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from .doctor import run_doctor
 from .models import LabelSpec
 from .package import create_package, verify_package
 from .validate import validate
@@ -34,17 +35,8 @@ def _print_report(report: dict, as_json: bool) -> None:
 
 
 def _doctor() -> dict:
-    tools = {}
-    for name, module in (("PyMuPDF", "pymupdf"), ("ZXing-C++", "zxingcpp"), ("Callas pdfToolbox", None)):
-        if module is None:
-            tools[name] = {"available": False, "status": "optional commercial adapter not configured"}
-            continue
-        try:
-            __import__(module)
-            tools[name] = {"available": True, "status": "available"}
-        except ImportError:
-            tools[name] = {"available": False, "status": f"install Python module {module}"}
-    return {"passed": True, "tools": tools}
+    """Report production dependency states (see labelos.doctor)."""
+    return run_doctor()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,7 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser = subparsers.add_parser("verify-package", help="Verify release-package checksums")
     verify_parser.add_argument("destination", type=Path)
     verify_parser.add_argument("--json", action="store_true", help="Print machine-readable output")
-    doctor_parser = subparsers.add_parser("doctor", help="Report available optional validators")
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Report production dependency readiness"
+    )
     doctor_parser.add_argument("--json", action="store_true", help="Print machine-readable output")
     return parser
 
@@ -70,7 +64,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "doctor":
             result = _doctor()
-            print(json.dumps(result, indent=2, sort_keys=True) if args.json else json.dumps(result["tools"], indent=2))
+            print(
+                json.dumps(result, indent=2, sort_keys=True)
+                if args.json
+                else json.dumps(result["components"], indent=2, sort_keys=True)
+            )
             return 0
         if args.command == "verify-package":
             failures = verify_package(args.destination)

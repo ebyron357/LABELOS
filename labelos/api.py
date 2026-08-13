@@ -142,6 +142,33 @@ def create_app(service: ProductionService | None = None) -> FastAPI:
             result={"service": "labelos-api", "version": __version__},
         )
 
+    @app.get("/ready")
+    async def ready() -> JSONResponse:
+        """Readiness probe: storage must be writable and the API token configured."""
+        checks: dict[str, Any] = {}
+        try:
+            production.storage.ensure_layout()
+            probe = production.storage.path("jobs", "index.json")
+            checks["storage"] = {
+                "ready": probe.parent.is_dir() and os.access(probe.parent, os.W_OK),
+                "path": str(production.storage.root),
+            }
+        except (OSError, LabelosException) as error:
+            checks["storage"] = {"ready": False, "error": str(error)}
+        try:
+            _api_token()
+            checks["api_token"] = {"ready": True}
+        except RuntimeError as error:
+            checks["api_token"] = {"ready": False, "error": str(error)}
+        ok = all(entry.get("ready") for entry in checks.values())
+        payload = envelope(
+            success=ok,
+            status="ready" if ok else "not_ready",
+            exit_code=0 if ok else 1,
+            result={"service": "labelos-api", "version": __version__, "checks": checks},
+        )
+        return JSONResponse(status_code=200 if ok else 503, content=payload)
+
     @app.get("/doctor", dependencies=[Depends(require_bearer)])
     async def doctor() -> dict[str, Any]:
         with log_operation("doctor"):
