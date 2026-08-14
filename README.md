@@ -34,7 +34,9 @@ Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset
 and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
 LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+code was checked. When `safe_area_mm` is configured, LABELOS renders the artwork, ignores a
+uniform full-bleed background, and rejects visible content outside the trim-safe area. Artwork
+whose background prevents that analysis is rejected rather than silently accepted.
 
 ## Commands
 
