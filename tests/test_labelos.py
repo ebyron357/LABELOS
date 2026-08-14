@@ -243,3 +243,30 @@ def test_safe_area_applies_to_svg_artwork(tmp_path):
     report = validate(spec)
 
     assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_safe_area_applies_to_pdf_artwork(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(
+        pymupdf.Rect(3 / (25.4 / 72), 3 / (25.4 / 72), 101 / (25.4 / 72), 51 / (25.4 / 72)),
+        color=(0, 0, 0),
+        fill=(0, 0, 0),
+    )
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
