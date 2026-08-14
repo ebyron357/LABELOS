@@ -16,7 +16,9 @@
   canonical `label-spec.json`, SHA-256 checksums, and byte counts. Verification rejects malformed
   manifests, traversal paths, symlinked artifacts, hash/size mismatches, failed reports, and
   mismatched report/spec/manifest data.
-- Passing and failing fixture coverage plus CLI/package regression tests.
+- Automated passing and failure coverage plus CLI/package regression tests. The repository includes
+  only a generic passing artwork sample; approved SKU-specific passing and failing fixtures remain
+  a product-owner input.
 
 ## Known external/human blockers
 
