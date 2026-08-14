@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -165,3 +166,101 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_safe_area_accepts_uniform_full_bleed_background(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((60, 60, 1000, 500), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["safe_area"]["content_bounds_px"] == [60, 60, 1001, 501]
+
+
+def test_safe_area_rejects_content_outside_allowed_bounds(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((20, 60, 1000, 500), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert "SAFE_AREA_CONTENT_OUTSIDE" in [issue.code for issue in report.issues]
+
+
+def test_safe_area_rejects_out_of_bounds_svg_content(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+  <rect width="106" height="56" fill="white"/>
+  <rect x="1" y="6" width="100" height="44" fill="black"/>
+</svg>
+""",
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert "SAFE_AREA_CONTENT_OUTSIDE" in [issue.code for issue in report.issues]
+
+
+def test_safe_area_rejects_out_of_bounds_pdf_content(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(page.rect, color=None, fill=(1, 1, 1))
+    page.draw_rect(pymupdf.Rect(3, 60, 250, 150), color=None, fill=(0, 0, 0))
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert "SAFE_AREA_CONTENT_OUTSIDE" in [issue.code for issue in report.issues]
