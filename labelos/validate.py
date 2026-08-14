@@ -32,6 +32,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -180,6 +181,105 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     for kind, expected in expectations:
         if expected and expected not in decoded:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Require visible artwork to remain inside the configured safe area.
+
+    A uniform opaque canvas background is intentionally excluded from the content bounds:
+    full-bleed background color is valid, while text, marks, and images must be inset by
+    both bleed and safe-area margins.
+    """
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        with _artwork_image(spec.artwork, Image) as image:
+            bounds = _visible_bounds(image)
+            width_px, height_px = image.size
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add(
+            "SAFE_AREA_UNCHECKED",
+            "error",
+            f"Could not determine visible artwork bounds: {error}",
+        )
+        return
+    if bounds is None:
+        report.metadata["safe_area_bounds_px"] = None
+        return
+
+    margin_mm = spec.bleed_mm + spec.safe_area_mm
+    allowed = (
+        width_px * margin_mm / (spec.width_mm + 2 * spec.bleed_mm),
+        height_px * margin_mm / (spec.height_mm + 2 * spec.bleed_mm),
+        width_px * (1 - margin_mm / (spec.width_mm + 2 * spec.bleed_mm)),
+        height_px * (1 - margin_mm / (spec.height_mm + 2 * spec.bleed_mm)),
+    )
+    report.metadata["safe_area_bounds_px"] = {
+        "content": {"left": bounds[0], "top": bounds[1], "right": bounds[2], "bottom": bounds[3]},
+        "allowed": {"left": round(allowed[0], 2), "top": round(allowed[1], 2),
+                    "right": round(allowed[2], 2), "bottom": round(allowed[3], 2)},
+    }
+    tolerance = 1
+    if (
+        bounds[0] < allowed[0] - tolerance
+        or bounds[1] < allowed[1] - tolerance
+        or bounds[2] > allowed[2] + tolerance
+        or bounds[3] > allowed[3] + tolerance
+    ):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            f"Visible artwork bounds {bounds} extend outside the {margin_mm:g} mm inset safe area",
+        )
+
+
+def _artwork_image(artwork: Path, image_module):
+    """Return artwork as a Pillow image, rasterizing SVG/PDF at production resolution."""
+    if artwork.suffix.lower() == ".png":
+        image = image_module.open(artwork)
+        image.load()
+        return image
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Artwork must contain one page, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=True)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
+
+
+def _visible_bounds(image):
+    """Find non-background pixels, treating a uniform opaque corner color as canvas fill."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    corners = [rgba.getpixel(point) for point in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))]
+    background = corners[0]
+    uniform_background = all(
+        max(abs(channel - reference) for channel, reference in zip(pixel[:3], background[:3])) <= 4
+        for pixel in corners[1:]
+    )
+    pixels = rgba.load()
+    left, top, right, bottom = width, height, -1, -1
+    for y in range(height):
+        for x in range(width):
+            pixel = pixels[x, y]
+            visible = pixel[3] > 4 and (
+                not uniform_background
+                or max(abs(channel - reference) for channel, reference in zip(pixel[:3], background[:3])) > 4
+                or (background[3] <= 4 and pixel[3] > 4)
+            )
+            if visible:
+                left, top = min(left, x), min(top, y)
+                right, bottom = max(right, x), max(bottom, y)
+    return None if right < 0 else (left, top, right + 1, bottom + 1)
 
 
 def _code_image(artwork: Path, image_module):

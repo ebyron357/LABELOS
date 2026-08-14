@@ -34,12 +34,14 @@ Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset
 and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
 LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+code was checked. When `safe_area_mm` is nonzero, visible marks must remain within the trim
+area inset by the configured bleed plus safe-area margin; a uniform full-bleed canvas background
+is allowed.
 
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  required copy, safe-area bounds, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies package checksums.
