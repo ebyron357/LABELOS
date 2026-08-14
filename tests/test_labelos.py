@@ -52,6 +52,17 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_malformed_pdf_fails_closed_without_crashing(tmp_path):
+    artwork = tmp_path / "corrupt.pdf"
+    artwork.write_bytes(b"%PDF-1.7\nnot a valid PDF")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [(issue.code, issue.severity) for issue in report.issues] == [("PDF_INVALID", "error")]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
