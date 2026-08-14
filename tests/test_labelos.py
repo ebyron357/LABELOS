@@ -62,6 +62,35 @@ def test_package_contains_verified_manifest(tmp_path):
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
 
 
+def test_verify_package_rejects_malformed_or_unsafe_manifest_entries(tmp_path):
+    destination = tmp_path / "release"
+    destination.mkdir()
+    manifest = destination / "manifest.json"
+
+    manifest.write_text('{"schema_version": 99}', encoding="utf-8")
+    assert verify_package(destination) == ["manifest schema_version must be 1"]
+
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artwork": {"file": "../outside.svg", "sha256": "0" * 64, "bytes": 1},
+                "validation_report": {
+                    "file": "validation-report.json",
+                    "sha256": "0" * 64,
+                    "bytes": 1,
+                    "passed": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert verify_package(destination) == [
+        "artwork file must be a package-relative filename",
+        "validation_report file is missing: validation-report.json",
+    ]
+
+
 def test_cli_validate_and_package(tmp_path, capsys):
     config = tmp_path / "label.json"
     config.write_text(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
         "validation_report": {
             "file": report_path.name,
             "sha256": _sha256(report_path),
+            "bytes": report_path.stat().st_size,
             "passed": report.passed,
         },
         "spec": report.metadata.get("spec", {}),
@@ -52,15 +54,45 @@ def verify_package(destination: Path) -> list[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return [f"manifest.json is invalid JSON: {error}"]
-    failures = []
+    if not isinstance(manifest, dict):
+        return ["manifest root must be an object"]
+    if manifest.get("schema_version") != 1:
+        return ["manifest schema_version must be 1"]
+
+    failures: list[str] = []
     for key in ("artwork", "validation_report"):
-        entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
+        entry = manifest.get(key)
+        if not isinstance(entry, dict):
+            failures.append(f"manifest {key} entry must be an object")
+            continue
+        filename = entry.get("file")
+        if not _is_package_filename(filename):
+            failures.append(f"{key} file must be a package-relative filename")
+            continue
+        checksum = entry.get("sha256")
+        if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
+            failures.append(f"{key} sha256 must be a lowercase 64-character hex digest")
+            continue
+        expected_bytes = entry.get("bytes")
+        if not isinstance(expected_bytes, int) or isinstance(expected_bytes, bool) or expected_bytes < 0:
+            failures.append(f"{key} bytes must be a non-negative integer")
+            continue
+        path = destination / filename
         if not path.is_file():
             failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
+        elif checksum != _sha256(path):
             failures.append(f"{key} checksum mismatch: {path.name}")
+        elif expected_bytes != path.stat().st_size:
+            failures.append(f"{key} byte count mismatch: {path.name}")
+    report_entry = manifest.get("validation_report")
+    if isinstance(report_entry, dict) and report_entry.get("passed") is not True:
+        failures.append("validation_report passed must be true")
     return failures
+
+
+def _is_package_filename(value: object) -> bool:
+    """Allow only one normal file name, preventing manifest path traversal."""
+    return isinstance(value, str) and bool(value) and Path(value).name == value and value not in {".", ".."}
 
 
 def _sha256(path: Path) -> str:
