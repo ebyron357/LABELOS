@@ -34,7 +34,8 @@
 
 ## Verification record
 
-Verified on 2026-08-14 from the working tree that will be committed after this record:
+Verified on 2026-08-14 for code changes committed in
+`9fde3d03243c83d6a94dc2330a5420d52604f8aa`:
 
 ```text
 python3 -m pytest -q                      # 10 passed
