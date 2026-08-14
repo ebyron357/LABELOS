@@ -30,6 +30,7 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -144,6 +145,82 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure visible content remains inside the configured trim-safe area."""
+
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        with _code_image(spec.artwork, Image) as image:
+            bounds = _visible_bounds(image.convert("RGBA"))
+            if bounds is None:
+                report.add(
+                    "SAFE_AREA_ANALYSIS_UNAVAILABLE",
+                    "error",
+                    "Could not determine visible content bounds from artwork background",
+                )
+                return
+            width_px, height_px = image.size
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_ANALYSIS_FAILED", "error", f"Could not inspect safe area: {error}")
+        return
+
+    inset_mm = spec.bleed_mm + spec.safe_area_mm
+    full_width_mm = spec.width_mm + 2 * spec.bleed_mm
+    full_height_mm = spec.height_mm + 2 * spec.bleed_mm
+    allowed = (
+        inset_mm / full_width_mm * width_px,
+        inset_mm / full_height_mm * height_px,
+        (full_width_mm - inset_mm) / full_width_mm * width_px,
+        (full_height_mm - inset_mm) / full_height_mm * height_px,
+    )
+    report.metadata["safe_area"] = {
+        "content_bounds_px": dict(zip(("left", "top", "right", "bottom"), bounds)),
+        "inset_mm": inset_mm,
+    }
+    # A one-pixel tolerance prevents anti-aliasing at a legitimate boundary from failing a label.
+    if (
+        bounds[0] < allowed[0] - 1
+        or bounds[1] < allowed[1] - 1
+        or bounds[2] > allowed[2] + 1
+        or bounds[3] > allowed[3] + 1
+    ):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            f"Visible content exceeds the {spec.safe_area_mm:g} mm safe area inside trim",
+        )
+
+
+def _visible_bounds(image):
+    """Return non-background content bounds, ignoring a uniform full-bleed canvas."""
+
+    from PIL import Image, ImageChops
+
+    pixels = image.load()
+    corners = (
+        pixels[0, 0],
+        pixels[image.width - 1, 0],
+        pixels[0, image.height - 1],
+        pixels[image.width - 1, image.height - 1],
+    )
+    if len(set(corners)) != 1:
+        return None
+    background = corners[0]
+    mask = Image.new("L", image.size)
+    for channel, background_value in zip(image.split(), background):
+        difference = channel.point(
+            lambda value, background_value=background_value: 255
+            if abs(value - background_value) > 8
+            else 0
+        )
+        mask = ImageChops.lighter(mask, difference)
+    return mask.getbbox()
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
