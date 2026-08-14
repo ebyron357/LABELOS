@@ -7,6 +7,7 @@ import struct
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from .models import LabelSpec, Report
 
@@ -34,6 +35,7 @@ def validate(spec: LabelSpec) -> Report:
         return report
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -187,6 +189,97 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     for kind, expected in expectations:
         if expected and expected not in decoded:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject non-background content which intrudes into the configured safe area."""
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        with _artwork_image(spec.artwork, Image) as image:
+            bounds = _content_bounds(image)
+            width_px, height_px = image.size
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add(
+            "SAFE_AREA_UNAVAILABLE",
+            "error",
+            f"Could not render artwork for safe-area validation: {error}",
+        )
+        return
+
+    full_width_mm = spec.width_mm + 2 * spec.bleed_mm
+    full_height_mm = spec.height_mm + 2 * spec.bleed_mm
+    inset_x = width_px * (spec.bleed_mm + spec.safe_area_mm) / full_width_mm
+    inset_y = height_px * (spec.bleed_mm + spec.safe_area_mm) / full_height_mm
+    allowed = (inset_x, inset_y, width_px - inset_x, height_px - inset_y)
+    report.metadata["safe_area"] = {
+        "content_bounds_px": list(bounds) if bounds else None,
+        "allowed_bounds_px": [round(value, 2) for value in allowed],
+    }
+    if bounds and (
+        bounds[0] < allowed[0] - 1
+        or bounds[1] < allowed[1] - 1
+        or bounds[2] > allowed[2] + 1
+        or bounds[3] > allowed[3] + 1
+    ):
+        report.add(
+            "SAFE_AREA_CONTENT_OUTSIDE",
+            "error",
+            "Non-background artwork content extends outside the configured bleed and safe area",
+        )
+
+
+def _artwork_image(artwork: Path, image_module: Any):
+    """Return a loaded Pillow image, rasterizing vector artwork at 300 DPI."""
+    if artwork.suffix.lower() == ".png":
+        image = image_module.open(artwork)
+        image.load()
+        return image
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Artwork must contain exactly one page, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=True)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
+
+
+def _content_bounds(image: Any) -> tuple[int, int, int, int] | None:
+    """Find non-background bounds using the four canvas corners as the background sample."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    corners = [
+        rgba.getpixel((0, 0)),
+        rgba.getpixel((width - 1, 0)),
+        rgba.getpixel((0, height - 1)),
+        rgba.getpixel((width - 1, height - 1)),
+    ]
+    background = None
+    if any(pixel[3] > 0 for pixel in corners) and all(
+        max(pixel[index] for pixel in corners) - min(pixel[index] for pixel in corners) <= 12
+        for index in range(3)
+    ):
+        background = tuple(sum(pixel[index] for pixel in corners) // 4 for index in range(3))
+    pixels = rgba.load()
+    left, top, right, bottom = width, height, -1, -1
+    for y in range(height):
+        for x in range(width):
+            pixel = pixels[x, y]
+            is_content = pixel[3] > 0 and (
+                background is None or any(abs(pixel[index] - background[index]) > 12 for index in range(3))
+            )
+            if is_content:
+                left, top = min(left, x), min(top, y)
+                right, bottom = max(right, x), max(bottom, y)
+    return None if right == -1 else (left, top, right + 1, bottom + 1)
 
 
 def _code_image(artwork: Path, image_module):
