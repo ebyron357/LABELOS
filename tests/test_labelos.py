@@ -52,6 +52,22 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_malformed_pdf_fails_closed_in_cli(tmp_path, capsys):
+    artwork = tmp_path / "malformed.pdf"
+    artwork.write_bytes(b"not a PDF")
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}),
+        encoding="utf-8",
+    )
+
+    assert main(["validate", str(config), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+
+    assert not report["passed"]
+    assert [issue["code"] for issue in report["issues"]] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
