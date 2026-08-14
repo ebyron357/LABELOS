@@ -62,6 +62,40 @@ def test_package_contains_verified_manifest(tmp_path):
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
 
 
+def test_package_verification_rejects_incomplete_or_unsupported_manifests(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+
+    contents["validation_report"] = {"passed": True}
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+    assert verify_package(package) == ["validation_report file name is invalid"]
+
+    contents["validation_report"] = {
+        "file": "validation-report.json",
+        "sha256": "0" * 64,
+        "passed": True,
+    }
+    contents["schema_version"] = 99
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+    assert verify_package(package) == ["unsupported manifest schema version: 99"]
+
+
+def test_package_verification_rejects_unverified_or_unsafe_manifest_entries(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+
+    contents["validation_report"]["passed"] = False
+    contents["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(package) == [
+        "artwork file name is invalid",
+        "validation_report must record a passing validation result",
+    ]
+
+
 def test_cli_validate_and_package(tmp_path, capsys):
     config = tmp_path / "label.json"
     config.write_text(
