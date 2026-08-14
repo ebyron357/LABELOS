@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -50,6 +51,66 @@ def test_dimension_mismatch_fails():
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
     )
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def test_safe_area_allows_uniform_full_bleed_background(tmp_path):
+    artwork = tmp_path / "background.png"
+    Image.new("RGBA", (100, 100), "white").save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 20,
+            "height_mm": 20,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["safe_area"]["content_bounds_px"] is None
+
+
+def test_safe_area_rejects_content_outside_inset(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGBA", (100, 100), "white")
+    ImageDraw.Draw(image).rectangle((0, 40, 10, 60), fill="red")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 20,
+            "height_mm": 20,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_CONTENT_OUT_OF_BOUNDS" for issue in report.issues)
+
+
+def test_safe_area_rejects_svg_content_outside_inset(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" viewBox="0 0 20 20">'
+        '<rect width="2" height="20" fill="red"/></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "safe_area_mm": 2}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_CONTENT_OUT_OF_BOUNDS" for issue in report.issues)
 
 
 def test_package_contains_verified_manifest(tmp_path):

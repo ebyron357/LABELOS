@@ -30,6 +30,7 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -144,6 +145,98 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure visible artwork stays inside the configured safe area.
+
+    A uniform canvas background is deliberately ignored, so a full-bleed background
+    does not create a false failure. The check fails closed when it cannot inspect
+    an artwork format for which the safe area was requested.
+    """
+
+    if spec.safe_area_mm == 0:
+        return
+
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image, ImageChops
+
+        if spec.artwork.suffix.lower() == ".png":
+            with Image.open(spec.artwork) as source:
+                image = source.convert("RGBA")
+        else:
+            import pymupdf
+
+            document = pymupdf.open(spec.artwork)
+            try:
+                if document.page_count != 1:
+                    raise ValueError(f"expected one page, found {document.page_count}")
+                pixmap = document[0].get_pixmap(dpi=300, alpha=True)
+                image = Image.open(BytesIO(pixmap.tobytes("png"))).convert("RGBA")
+                image.load()
+            finally:
+                document.close()
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_CHECK_UNAVAILABLE", "error", f"Could not inspect safe area: {error}")
+        return
+
+    bounds = _content_bounds(image, Image, ImageChops)
+    if bounds is None:
+        report.metadata["safe_area"] = {"content_bounds_px": None}
+        return
+
+    left, top, right, bottom = bounds
+    inset_mm = spec.bleed_mm + spec.safe_area_mm
+    page_width_mm = spec.width_mm + 2 * spec.bleed_mm
+    page_height_mm = spec.height_mm + 2 * spec.bleed_mm
+    allowed = (
+        image.width * inset_mm / page_width_mm,
+        image.height * inset_mm / page_height_mm,
+        image.width * (page_width_mm - inset_mm) / page_width_mm,
+        image.height * (page_height_mm - inset_mm) / page_height_mm,
+    )
+    report.metadata["safe_area"] = {
+        "content_bounds_px": {"left": left, "top": top, "right": right, "bottom": bottom},
+        "inset_mm": inset_mm,
+    }
+    if left < allowed[0] or top < allowed[1] or right > allowed[2] or bottom > allowed[3]:
+        report.add(
+            "SAFE_AREA_CONTENT_OUT_OF_BOUNDS",
+            "error",
+            f"Visible content extends outside the {inset_mm:.2f} mm bleed-plus-safe-area inset",
+        )
+
+
+def _content_bounds(image, image_module, image_chops):
+    """Return bounds of visible non-background content in an RGBA image."""
+
+    corners = (
+        image.getpixel((0, 0)),
+        image.getpixel((image.width - 1, 0)),
+        image.getpixel((0, image.height - 1)),
+        image.getpixel((image.width - 1, image.height - 1)),
+    )
+    colors = {corner[:3] for corner in corners}
+    if len(colors) != 1:
+        return image.getchannel("A").getbbox() or image.convert("RGB").getbbox()
+
+    canvas = image_module.new("RGB", image.size, colors.pop())
+    rgb_bounds = image_chops.difference(image.convert("RGB"), canvas).getbbox()
+    if any(corner[3] != 0 for corner in corners):
+        return rgb_bounds
+
+    alpha_bounds = image.getchannel("A").getbbox()
+    if rgb_bounds is None:
+        return alpha_bounds
+    if alpha_bounds is None:
+        return rgb_bounds
+    return (
+        min(rgb_bounds[0], alpha_bounds[0]),
+        min(rgb_bounds[1], alpha_bounds[1]),
+        max(rgb_bounds[2], alpha_bounds[2]),
+        max(rgb_bounds[3], alpha_bounds[3]),
+    )
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
