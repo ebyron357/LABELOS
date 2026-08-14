@@ -52,6 +52,21 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_committed_failing_fixtures_fail_validation_and_cli(capsys):
+    fixtures = {
+        "failing-dimensions.json": "DIMENSIONS_MISMATCH",
+        "failing-required-copy.json": "REQUIRED_COPY_MISSING",
+    }
+    for fixture_name, expected_issue in fixtures.items():
+        config = ROOT / "fixtures" / fixture_name
+        spec = LabelSpec.from_dict(json.loads(config.read_text(encoding="utf-8")), config.parent)
+
+        assert any(issue.code == expected_issue for issue in validate(spec).issues)
+        assert main(["validate", str(config), "--json"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert any(issue["code"] == expected_issue for issue in payload["issues"])
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)

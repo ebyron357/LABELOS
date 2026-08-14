@@ -11,7 +11,8 @@
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
   and SHA-256 checksums.
-- Passing and failing fixture coverage plus CLI/package regression tests.
+- Passing baseline artwork plus reusable failing dimensions and required-copy fixture
+  configurations, covered by validator and CLI regression tests.
 
 ## Known external/human blockers
 
@@ -26,6 +27,13 @@
 1. Add approved product specs and both passing/failing artwork fixtures for every SKU.
 2. Add the licensed Callas adapter/profile when the printer supplies its preflight target.
 3. Run the full verification commands recorded below for each release.
+
+## In-flight repository work
+
+- Active draft PRs address safe-area bounds enforcement ([#51](https://github.com/ebyron357/LABELOS/pull/51)),
+  malformed-PDF fail-closed behavior ([#53](https://github.com/ebyron357/LABELOS/pull/53)), and
+  release-manifest hardening ([#52](https://github.com/ebyron357/LABELOS/pull/52)). They are not
+  included in this branch's baseline and should not be duplicated by later autonomous runs.
 
 ## Verification record
 

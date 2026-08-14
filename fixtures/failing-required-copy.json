@@ -1,0 +1,7 @@
+{
+  "artwork": "passing-label.svg",
+  "width_mm": 100,
+  "height_mm": 50,
+  "bleed_mm": 3,
+  "required_copy": ["Example Product", "NOT PRESENT ON ARTWORK"]
+}

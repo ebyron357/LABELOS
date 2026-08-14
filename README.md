@@ -46,6 +46,19 @@ code was checked.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
+## Regression fixtures
+
+`fixtures/passing-label.svg` is the baseline passing vector label. Reusable failing
+configurations make operator and CI failure expectations explicit:
+
+- `fixtures/failing-dimensions.json` uses a deliberately undersized SVG and must report
+  `DIMENSIONS_MISMATCH`.
+- `fixtures/failing-required-copy.json` requests copy absent from the artwork and must report
+  `REQUIRED_COPY_MISSING`.
+
+Run either fixture with `labelos validate fixtures/<fixture>.json --json`; a failing fixture
+exits with status 1 by design and must not be packaged.
+
 ## Current scope and limitations
 
 The core validator provides reproducible local checks and package integrity. Commercial
