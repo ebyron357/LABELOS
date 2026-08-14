@@ -49,6 +49,19 @@ def _validate_png(spec: LabelSpec, report: Report) -> str:
         report.add("PNG_INVALID", "error", "File is not a valid PNG")
         return ""
     width, height = struct.unpack(">II", data[16:24])
+    try:
+        from PIL import Image
+    except ImportError:
+        report.add("PNG_READER_UNAVAILABLE", "error", "Install Pillow to inspect PNG artwork")
+        return ""
+    try:
+        with Image.open(spec.artwork) as image:
+            if image.format != "PNG":
+                raise ValueError("Pillow did not identify the file as PNG")
+            image.verify()
+    except (OSError, SyntaxError, ValueError) as error:
+        report.add("PNG_INVALID", "error", f"PNG cannot be decoded: {error}")
+        return ""
     dpi = _png_dpi(data)
     report.checks.extend(["format:png", "dimensions", "raster-resolution"])
     report.metadata["pixels"] = {"width": width, "height": height}
