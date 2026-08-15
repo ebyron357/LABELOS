@@ -31,6 +31,7 @@ def validate(spec: LabelSpec) -> Report:
         return report
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
+    _validate_safe_area(spec, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
@@ -152,6 +153,92 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
     for value in spec.required_copy:
         if value not in text:
             report.add("REQUIRED_COPY_MISSING", "error", f"Required copy not found: {value!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject non-uniform artwork in the bleed or configured safe-area margin.
+
+    A label may deliberately have a uniform full-bleed background.  Everything else must
+    remain at least ``bleed_mm + safe_area_mm`` from the outer artwork edge, because the
+    trim line sits inside the bleed.
+    """
+
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        image = _safe_area_image(spec.artwork)
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+        return
+
+    try:
+        from PIL import Image, ImageChops, ImageDraw
+
+        source_image = image
+        image = source_image.convert("RGB")
+        source_image.close()
+        width, height = image.size
+        margin_x = round(width * (spec.bleed_mm + spec.safe_area_mm) / (spec.width_mm + 2 * spec.bleed_mm))
+        margin_y = round(
+            height * (spec.bleed_mm + spec.safe_area_mm) / (spec.height_mm + 2 * spec.bleed_mm)
+        )
+        if margin_x < 1 or margin_y < 1 or margin_x * 2 >= width or margin_y * 2 >= height:
+            report.add("SAFE_AREA_UNCHECKABLE", "error", "Safe-area margin cannot be represented in artwork")
+            return
+
+        corners = (
+            image.getpixel((0, 0)),
+            image.getpixel((width - 1, 0)),
+            image.getpixel((0, height - 1)),
+            image.getpixel((width - 1, height - 1)),
+        )
+        if len(set(corners)) != 1:
+            report.add(
+                "SAFE_AREA_UNCHECKABLE",
+                "error",
+                "Artwork corners are not a uniform full-bleed background",
+            )
+            return
+        background = Image.new("RGB", image.size, corners[0])
+        difference = ImageChops.difference(image, background)
+        # Rendering may create single-value antialiasing noise at an edge. Treat only a
+        # meaningful (more than 8/255 per channel) color change as artwork content.
+        changed = difference.point(lambda value: 255 if value > 8 else 0)
+        outer = Image.new("L", image.size, 255)
+        inner = (margin_x, margin_y, width - margin_x, height - margin_y)
+        ImageDraw.Draw(outer).rectangle(inner, fill=0)
+        if ImageChops.multiply(changed.convert("L"), outer).getbbox():
+            report.add(
+                "SAFE_AREA_VIOLATION",
+                "error",
+                "Non-background artwork intrudes into the bleed or safe-area margin",
+            )
+    finally:
+        image.close()
+
+
+def _safe_area_image(artwork: Path):
+    """Render all supported artwork types to a raster for geometric safe-area inspection."""
+
+    from PIL import Image
+
+    if artwork.suffix.lower() == ".png":
+        image = Image.open(artwork)
+        image.load()
+        return image
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Artwork must contain one page, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        image = Image.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
 
 
 def _validate_codes(spec: LabelSpec, report: Report) -> None:
