@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -50,6 +51,72 @@ def test_dimension_mismatch_fails():
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
     )
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def _safe_area_spec(artwork: Path) -> LabelSpec:
+    return LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        artwork.parent,
+    )
+
+
+def test_png_content_inside_safe_area_passes(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((60, 100, 400, 300), fill="black")
+    image.save(artwork)
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_png_content_outside_safe_area_fails(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((0, 100, 40, 300), fill="black")
+    image.save(artwork)
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_svg_content_outside_safe_area_fails(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" '
+            'viewBox="0 0 106 56"><rect width="106" height="56" fill="white"/>'
+            '<rect x="0" y="10" width="4" height="20" fill="black"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_pdf_content_outside_safe_area_fails(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(pymupdf.Rect(0, 20, 10, 100), color=(0, 0, 0), fill=(0, 0, 0))
+    document.save(artwork)
+    document.close()
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
 
 
 def test_package_contains_verified_manifest(tmp_path):
