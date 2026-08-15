@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -52,14 +53,69 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_fails_closed_without_crashing(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a pdf")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    assert json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))["artwork"] == (
+        "passing-label.svg"
+    )
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_unexpected_or_invalid_content(tmp_path):
+    spec = passing_spec()
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    (manifest.parent / "untracked.txt").write_text("not in manifest", encoding="utf-8")
+    assert verify_package(manifest.parent) == ["unexpected package file: untracked.txt"]
+
+    (manifest.parent / "untracked.txt").unlink()
+    package_spec = manifest.parent / "label-spec.json"
+    package_spec.write_text('{"artwork": "wrong.svg"}', encoding="utf-8")
+    failures = verify_package(manifest.parent)
+    assert "label_spec checksum mismatch: label-spec.json" in failures
+    assert "label_spec byte count mismatch: label-spec.json" in failures
+
+
+def test_package_verification_rejects_failing_report_even_with_matching_checksum(tmp_path):
+    spec = passing_spec()
+    report = validate(spec)
+    manifest_path = create_package(spec, report, tmp_path / "release")
+    report_path = manifest_path.parent / "validation-report.json"
+    report_data = json.loads(report_path.read_text(encoding="utf-8"))
+    report_data["passed"] = False
+    report_path.write_text(json.dumps(report_data), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+
+    manifest["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == [
+        "validation_report does not record a passing validation"
+    ]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

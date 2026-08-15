@@ -9,8 +9,11 @@
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+- Immutable-style release directories containing copied artwork, normalized label specification,
+  validation report, manifest, SHA-256 checksums, and byte counts. Package verification rejects
+  unexpected/non-regular files, unsafe manifest paths, invalid artwork bindings, and reports that
+  do not record a pass.
+- Invalid PDFs fail closed with `PDF_INVALID` instead of escaping the operator CLI.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -25,7 +28,10 @@
 
 1. Add approved product specs and both passing/failing artwork fixtures for every SKU.
 2. Add the licensed Callas adapter/profile when the printer supplies its preflight target.
-3. Run the full verification commands recorded below for each release.
+3. Supply a governing definition of which artwork objects constitute critical safe-area content;
+   generic raster/PDF inspection cannot infer that distinction without rejecting valid full-bleed
+   artwork.
+4. Run the full verification commands recorded below for each release.
 
 ## Verification record
 
@@ -46,3 +52,17 @@ end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+
+Verified on 2026-08-15 from a working tree based on `1e86abd08646dfef720fc2f45fa168846527aec5`:
+
+```text
+python3 -m pytest -q                      # 12 passed
+python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos          # passed
+python3 -m build --outdir /tmp/labelos-production-build  # sdist and wheel created
+python3 -m labelos.cli validate examples/label.json --json  # passed
+python3 -m labelos.cli package examples/label.json /tmp/labelos-production-e2e --json  # passed
+python3 -m labelos.cli verify-package /tmp/labelos-production-e2e --json  # passed
+python3 -m labelos.cli doctor --json      # PyMuPDF/ZXing available; Callas unavailable
+python3 -m pip check                      # no broken requirements
+```
