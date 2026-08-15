@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -59,7 +60,37 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_verify_package_rejects_unsafe_or_duplicate_manifest_entries(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(manifest_path.parent) == ["artwork file path is invalid"]
+
+    manifest["artwork"]["file"] = "passing-label.svg"
+    manifest["label_spec"]["file"] = "passing-label.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(manifest_path.parent) == [
+        "label_spec file duplicates another manifest entry: passing-label.svg"
+    ]
+
+
+def test_verify_package_rejects_symbolic_link_artifacts(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    artwork = manifest_path.parent / "passing-label.svg"
+    original = tmp_path / "original.svg"
+    original.write_text(artwork.read_text(encoding="utf-8"), encoding="utf-8")
+    artwork.unlink()
+    artwork.symlink_to(original)
+    assert verify_package(manifest_path.parent) == [
+        "artwork file is missing or is not a regular file: passing-label.svg"
+    ]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -165,3 +196,55 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_safe_area_accepts_uniform_full_bleed_background(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((60, 60, 1000, 500), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+    report = validate(spec)
+    assert report.passed
+    assert report.metadata["safe_area"]["visible_bounds_mm"] == [6.0, 6.0, 100.1, 50.1]
+
+
+def test_safe_area_rejects_content_outside_allowed_bounds(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((20, 60, 1000, 500), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+    report = validate(spec)
+    assert not report.passed
+    assert "SAFE_AREA_VIOLATION" in [issue.code for issue in report.issues]
+
+
+def test_malformed_pdf_is_a_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    report = validate(
+        LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 10, "height_mm": 10}, tmp_path)
+    )
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]

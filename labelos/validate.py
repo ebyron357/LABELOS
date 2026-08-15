@@ -7,10 +7,13 @@ import struct
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
+from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+SAFE_AREA_RENDER_DPI = 300
+SAFE_AREA_RENDER_TOLERANCE_MM = 25.4 / SAFE_AREA_RENDER_DPI
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -31,15 +34,9 @@ def validate(spec: LabelSpec) -> Report:
         return report
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
+    _validate_safe_area(spec, report)
     _validate_codes(spec, report)
-    report.metadata["spec"] = {
-        "width_mm": spec.width_mm,
-        "height_mm": spec.height_mm,
-        "bleed_mm": spec.bleed_mm,
-        "trim_mm": spec.trim_mm,
-        "safe_area_mm": spec.safe_area_mm,
-        "min_dpi": spec.min_dpi,
-    }
+    report.metadata["spec"] = spec.to_dict(artwork=spec.artwork.name)
     return report
 
 
@@ -90,12 +87,15 @@ def _validate_pixel_dimensions(
 
 def _validate_svg(spec: LabelSpec, report: Report) -> str:
     text = spec.artwork.read_text(encoding="utf-8", errors="replace")
-    match = re.search(r"<svg\b[^>]*>", text, re.IGNORECASE)
-    if not match:
+    try:
+        root = ElementTree.fromstring(text)
+    except ElementTree.ParseError as error:
+        report.add("SVG_INVALID", "error", f"Invalid SVG XML: {error}")
+        return text
+    if root.tag.rsplit("}", 1)[-1].lower() != "svg":
         report.add("SVG_INVALID", "error", "No SVG root element found")
         return text
-    root = match.group(0)
-    width, height = (_svg_mm(root, "width"), _svg_mm(root, "height"))
+    width, height = (_svg_mm(root.get("width")), _svg_mm(root.get("height")))
     report.checks.extend(["format:svg", "dimensions"])
     if width is None or height is None:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
@@ -104,8 +104,8 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
     return text
 
 
-def _svg_mm(root: str, attr: str) -> float | None:
-    match = re.search(fr'\b{attr}=["\']\s*([0-9.]+)\s*(mm|cm|in|pt)["\']', root, re.IGNORECASE)
+def _svg_mm(value: str | None) -> float | None:
+    match = re.fullmatch(r"\s*([0-9.]+)\s*(mm|cm|in|pt)\s*", value or "", re.IGNORECASE)
     if not match:
         return None
     value, unit = float(match.group(1)), match.group(2).lower()
@@ -118,7 +118,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not read PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -127,7 +131,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
         text = page.get_text()
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
-        report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
+        report.metadata["pdf"] = {
+            "pages": document.page_count,
+            "fonts": len(page.get_fonts()),
+            "rotation": page.rotation,
+        }
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
         return text
@@ -152,6 +160,111 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
     for value in spec.required_copy:
         if value not in text:
             report.add("REQUIRED_COPY_MISSING", "error", f"Required copy not found: {value!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject visible marks which intrude into the configured trim-safe bounds."""
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    if any(issue.code in {"SVG_INVALID", "PDF_INVALID", "PDF_PAGE_COUNT"} for issue in report.issues):
+        return
+    try:
+        bounds = _visible_bounds_mm(spec)
+    except ImportError:
+        report.add(
+            "SAFE_AREA_UNCHECKABLE",
+            "error",
+            "Install Pillow and PyMuPDF to inspect artwork safe areas",
+        )
+        return
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+        return
+    report.metadata["safe_area"] = {
+        "visible_bounds_mm": [round(value, 3) for value in bounds] if bounds else None,
+        "allowed_bounds_mm": [round(value, 3) for value in _safe_bounds(spec)],
+    }
+    if bounds and _outside_safe_area(bounds, spec):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            "Visible non-background artwork extends outside the configured bleed and safe area",
+        )
+
+
+def _safe_bounds(spec: LabelSpec) -> tuple[float, float, float, float]:
+    inset = spec.bleed_mm + spec.safe_area_mm
+    return (
+        inset,
+        inset,
+        spec.width_mm + 2 * spec.bleed_mm - inset,
+        spec.height_mm + 2 * spec.bleed_mm - inset,
+    )
+
+
+def _outside_safe_area(bounds: tuple[float, float, float, float], spec: LabelSpec) -> bool:
+    left, top, right, bottom = _safe_bounds(spec)
+    x0, y0, x1, y1 = bounds
+    return (
+        x0 < left - SAFE_AREA_RENDER_TOLERANCE_MM
+        or y0 < top - SAFE_AREA_RENDER_TOLERANCE_MM
+        or x1 > right + SAFE_AREA_RENDER_TOLERANCE_MM
+        or y1 > bottom + SAFE_AREA_RENDER_TOLERANCE_MM
+    )
+
+
+def _visible_bounds_mm(spec: LabelSpec) -> tuple[float, float, float, float] | None:
+    """Render vectors at production resolution and locate non-background pixels."""
+    from PIL import Image
+
+    artwork = spec.artwork
+    if artwork.suffix.lower() == ".png":
+        with Image.open(artwork) as image:
+            return _occupied_bounds_mm(
+                image.convert("RGBA"),
+                spec.width_mm + 2 * spec.bleed_mm,
+                spec.height_mm + 2 * spec.bleed_mm,
+            )
+
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Expected one rendered page, found {document.page_count}")
+        page = document[0]
+        pixmap = page.get_pixmap(dpi=SAFE_AREA_RENDER_DPI, alpha=True)
+        image = Image.open(BytesIO(pixmap.tobytes("png"))).convert("RGBA")
+        return _occupied_bounds_mm(
+            image, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT
+        )
+    finally:
+        document.close()
+
+
+def _occupied_bounds_mm(image, width_mm: float, height_mm: float) -> tuple[float, float, float, float] | None:
+    from PIL import Image, ImageChops
+
+    white = Image.new("RGBA", image.size, "white")
+    rendered = Image.alpha_composite(white, image).convert("RGB")
+    corners = (
+        rendered.getpixel((0, 0)),
+        rendered.getpixel((rendered.width - 1, 0)),
+        rendered.getpixel((0, rendered.height - 1)),
+        rendered.getpixel((rendered.width - 1, rendered.height - 1)),
+    )
+    background = Image.new("RGB", image.size, corners[0] if len(set(corners)) == 1 else (255, 255, 255))
+    occupied = ImageChops.difference(rendered, background).getbbox()
+    if occupied is None:
+        return None
+    left, top, right, bottom = occupied
+    return (
+        left * width_mm / image.width,
+        top * height_mm / image.height,
+        right * width_mm / image.width,
+        bottom * height_mm / image.height,
+    )
 
 
 def _validate_codes(spec: LabelSpec, report: Report) -> None:
