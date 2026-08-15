@@ -9,8 +9,10 @@
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+- Immutable-style release directories containing copied artwork, a canonical package-local
+  specification, validation report, and SHA-256/byte-count manifest. Verification rejects
+  unexpected files, symlinks, unsafe manifest paths, duplicate entries, mismatched artwork
+  bindings, and reports that do not record a passing validation.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,20 +31,26 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-15 from commit `2aa45c495a03b083e0c94219e213888c55b39db4`:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 13 passed
 python3 -m ruff check .                   # passed
-python3 -m build                          # sdist and wheel created in dist/
+python3 -m compileall -q labelos tests    # passed
+python3 -m pip check                      # passed
+python3 -m build --outdir /tmp/labelos-production-build
+                                        # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-final-e2e --json
+python3 -m labelos.cli verify-package /tmp/labelos-final-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 13 tests passed; Ruff, bytecode compilation, and dependency checks passed; the sdist
+and wheel were generated in `/tmp/labelos-production-build`; and the end-to-end package was
+created and checksum-verified at `/tmp/labelos-final-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+decoded expected values. Package tests cover checksum and byte-count integrity, path traversal,
+unexpected files, canonical artwork binding, and a failing report with a regenerated manifest
+entry. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
