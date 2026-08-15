@@ -33,7 +33,8 @@
 
 ## Verification record
 
-Verified on 2026-08-15 (commit recorded after this verification):
+Verified on 2026-08-15 from implementation commit
+`b49d3d825c49e9254d5f8f3f7abec6d3f8b8296d`:
 
 ```text
 python3 -m pytest -q                      # 14 passed
@@ -55,3 +56,8 @@ QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and veri
 decoded expected values. Safe-area tests cover passing SVG artwork and failing PNG/PDF artwork;
 manifest tests cover checksum, byte-count, path-traversal, and unexpected-file rejection.
 GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+
+## Next engineering priority
+
+Add structured fail-closed handling and regression coverage for malformed PDF input, then
+continue expanding fixture coverage with approved per-SKU artwork when it is provided.
