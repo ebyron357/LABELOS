@@ -5,12 +5,15 @@
 - JSON label specification validation with physical dimensions, bleed, safe-area sanity,
   minimum DPI, and required-copy fields.
 - SVG, PNG, and PDF artwork validation through bundled PyMuPDF.
+- Safe-area enforcement for SVG, PNG, and PDF artwork: uniform full-bleed backgrounds are
+  permitted; non-background pixels in the bleed-plus-safe-area margin fail validation.
 - QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+- Immutable-style release directories containing copied artwork, a portable serialized label
+  specification, validation report, manifest, SHA-256 checksums, and byte counts. Verification
+  rejects tampering, unexpected files, non-passing reports, and invalid spec-to-artwork bindings.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,20 +32,23 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-15 from commit `d058be2963599f99201cb023284f0de2d1931d95`:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 12 passed
 python3 -m ruff check .                   # passed
-python3 -m build                          # sdist and wheel created in dist/
+python3 -m compileall -q labelos tests    # passed
+python3 -m pip check                      # passed
+python3 -m build --outdir /tmp/labelos-production-build
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-production-e2e-Ulpi0R/release --json
+python3 -m labelos.cli verify-package /tmp/labelos-production-e2e-Ulpi0R/release --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
-`doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
-QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+Results: 12 tests passed; Ruff, bytecode compilation, and dependency checks passed; the sdist and
+wheel were generated in `/tmp/labelos-production-build`; and the end-to-end package was created
+and checksum-verified at `/tmp/labelos-production-e2e-Ulpi0R/release`. `doctor` confirmed
+PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains TOOL UNAVAILABLE/BLOCKED. QR and
+Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their decoded expected
+values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
