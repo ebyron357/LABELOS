@@ -32,6 +32,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -118,7 +119,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -200,3 +205,112 @@ def _code_image(artwork: Path, image_module):
         return image
     finally:
         document.close()
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure non-background artwork stays inside the trim-safe rectangle.
+
+    The margin is measured from the physical artwork edge, so it includes bleed plus
+    the configured safe area. A uniform full-bleed background is intentionally
+    ignored. Ambiguous edge backgrounds fail closed because the safe area cannot be
+    verified reliably.
+    """
+
+    if spec.safe_area_mm <= 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+    except ImportError:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", "Install Pillow to validate the safe area")
+        return
+
+    try:
+        image = _safe_area_image(spec.artwork, Image)
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not render artwork for safe-area check: {error}")
+        return
+    try:
+        background = _edge_background(image)
+        if background is None:
+            report.add(
+                "SAFE_AREA_UNCHECKABLE",
+                "error",
+                "Artwork edge background is not uniform enough to verify the safe area",
+            )
+            return
+        margin_x, margin_y = _safe_area_pixels(spec, image.width, image.height)
+        report.metadata["safe_area"] = {
+            "margin_mm_from_artwork_edge": round(spec.bleed_mm + spec.safe_area_mm, 3),
+            "margin_pixels": {"x": margin_x, "y": margin_y},
+        }
+        if _has_content_in_margin(image, background, margin_x, margin_y):
+            report.add(
+                "SAFE_AREA_VIOLATION",
+                "error",
+                "Non-background artwork was detected outside the configured safe area",
+            )
+    finally:
+        image.close()
+
+
+def _safe_area_image(artwork: Path, image_module):
+    if artwork.suffix.lower() == ".png":
+        image = image_module.open(artwork)
+        image.load()
+        return image.convert("RGB")
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Artwork must contain one page, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image.convert("RGB")
+    finally:
+        document.close()
+
+
+def _edge_background(image):
+    """Return a uniform edge colour or None when content reaches an artwork edge."""
+
+    width, height = image.size
+    inset = max(1, min(width, height) // 100)
+    points = (
+        (inset, inset),
+        (width - 1 - inset, inset),
+        (inset, height - 1 - inset),
+        (width - 1 - inset, height - 1 - inset),
+    )
+    colors = [image.getpixel(point) for point in points]
+    background = tuple(sum(color[index] for color in colors) // len(colors) for index in range(3))
+    return background if all(_color_distance(color, background) <= 12 for color in colors) else None
+
+
+def _safe_area_pixels(spec: LabelSpec, width_px: int, height_px: int) -> tuple[int, int]:
+    artwork_width = spec.width_mm + 2 * spec.bleed_mm
+    artwork_height = spec.height_mm + 2 * spec.bleed_mm
+    margin_mm = spec.bleed_mm + spec.safe_area_mm
+    return (
+        max(1, round(width_px * margin_mm / artwork_width)),
+        max(1, round(height_px * margin_mm / artwork_height)),
+    )
+
+
+def _has_content_in_margin(image, background: tuple[int, int, int], margin_x: int, margin_y: int) -> bool:
+    width, height = image.size
+    for y in range(height):
+        in_vertical_margin = y < margin_y or y >= height - margin_y
+        for x in range(width):
+            in_horizontal_margin = x < margin_x or x >= width - margin_x
+            if (in_vertical_margin or in_horizontal_margin) and (
+                _color_distance(image.getpixel((x, y)), background) > 24
+            ):
+                return True
+    return False
+
+
+def _color_distance(first: tuple[int, int, int], second: tuple[int, int, int]) -> int:
+    return max(abs(left - right) for left, right in zip(first, second))
