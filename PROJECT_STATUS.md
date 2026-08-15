@@ -32,8 +32,7 @@
 
 ## Verification record
 
-Verified on 2026-08-15 from the safe-area implementation working tree based on commit
-`1e86abd`:
+Verified on 2026-08-15 for the safe-area implementation committed as `203256a`:
 
 ```text
 python3 -m pytest -q                      # 13 passed
