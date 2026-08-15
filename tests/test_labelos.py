@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 from base64 import b64encode
 from io import BytesIO
 from pathlib import Path
@@ -52,6 +54,20 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_produces_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a pdf", encoding="utf-8")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -59,7 +75,47 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+
+
+def test_package_manifest_binds_artwork_spec_and_report(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["schema_version"] == 2
+    assert (manifest_path.parent / "label-spec.json").is_file()
+    assert manifest["label_spec"]["bytes"] > 0
+    assert not verify_package(manifest_path.parent)
+
+
+def test_package_rejects_unexpected_files_and_symlinks(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest_path.parent
+    (package / "unapproved.txt").write_text("not in manifest", encoding="utf-8")
+    assert verify_package(package) == ["unexpected package files: unapproved.txt"]
+    (package / "unapproved.txt").unlink()
+    artwork = package / "passing-label.svg"
+    replacement = package / "replacement.svg"
+    artwork.rename(replacement)
+    os.symlink(replacement.name, artwork)
+    assert "artwork file is missing or is not a regular file: passing-label.svg" in verify_package(package)
+
+
+def test_package_rejects_passing_hash_with_failed_validation_report(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest_path.parent
+    report_path = package / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(package) == ["validation report does not record a passing result"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
