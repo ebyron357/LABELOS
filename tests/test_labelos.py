@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -50,6 +51,65 @@ def test_dimension_mismatch_fails():
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
     )
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def test_safe_area_allows_fixture_content_at_safe_boundary():
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": "fixtures/passing-label.svg",
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        ROOT,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+    assert report.metadata["safe_area"]["bounds_px"]["left"] > 0
+
+
+def test_safe_area_rejects_png_foreground_outside_inset(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1000, 500), "white")
+    ImageDraw.Draw(image).rectangle((10, 200, 40, 230), fill="black")
+    image.save(artwork, dpi=(254, 254))
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "safe_area_mm": 5, "min_dpi": 1},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_CONTENT_OUTSIDE" for issue in report.issues)
+
+
+def test_safe_area_allows_uniform_full_bleed_png_background(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGB", (1000, 500), "#f0c000")
+    ImageDraw.Draw(image).rectangle((300, 200, 700, 300), fill="black")
+    image.save(artwork, dpi=(254, 254))
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "safe_area_mm": 5, "min_dpi": 1},
+        tmp_path,
+    )
+
+    assert validate(spec).passed
+
+
+def test_invalid_pdf_is_reported_without_crashing(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
 
 
 def test_package_contains_verified_manifest(tmp_path):

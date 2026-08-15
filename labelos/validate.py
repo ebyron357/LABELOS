@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import struct
 from collections.abc import Callable
+from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -118,7 +120,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not read PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -182,11 +188,83 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
 
 
-def _code_image(artwork: Path, image_module):
-    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject foreground artwork outside the trim inset plus configured safe area.
+
+    A uniform full-bleed background is permitted.  Artwork is rasterized for this
+    conservative preflight check because the supported formats do not share a
+    portable object-boundary model.
+    """
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        with _artwork_image(spec.artwork, Image) as image:
+            rgb = image.convert("RGB")
+            background = _corner_background(rgb)
+            bounds = _safe_area_bounds(spec, rgb.size)
+            intrusion = _first_safe_area_intrusion(rgb, bounds, background)
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNAVAILABLE", "error", f"Could not inspect safe area: {error}")
+        return
+
+    report.metadata["safe_area"] = {
+        "bounds_px": {"left": bounds[0], "top": bounds[1], "right": bounds[2], "bottom": bounds[3]},
+        "background_rgb": background,
+    }
+    if intrusion is not None:
+        report.add(
+            "SAFE_AREA_CONTENT_OUTSIDE",
+            "error",
+            f"Foreground content at {intrusion[0]},{intrusion[1]} px is outside the safe area",
+        )
+
+
+def _safe_area_bounds(spec: LabelSpec, size: tuple[int, int]) -> tuple[int, int, int, int]:
+    total_width = spec.width_mm + 2 * spec.bleed_mm
+    total_height = spec.height_mm + 2 * spec.bleed_mm
+    inset_x = round(size[0] * (spec.bleed_mm + spec.safe_area_mm) / total_width)
+    inset_y = round(size[1] * (spec.bleed_mm + spec.safe_area_mm) / total_height)
+    if inset_x * 2 >= size[0] or inset_y * 2 >= size[1]:
+        raise ValueError("Safe area leaves no inspectable artwork")
+    return inset_x, inset_y, size[0] - inset_x - 1, size[1] - inset_y - 1
+
+
+def _corner_background(image) -> tuple[int, int, int]:
+    """Use the most common corner colour as the permitted full-bleed background."""
+    width, height = image.size
+    samples = [
+        image.getpixel((x, y))
+        for x, y in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))
+    ]
+    return max(set(samples), key=samples.count)
+
+
+def _first_safe_area_intrusion(
+    image, bounds: tuple[int, int, int, int], background: tuple[int, int, int]
+) -> tuple[int, int] | None:
+    left, top, right, bottom = bounds
+    width, height = image.size
+    for y in range(height):
+        for x in range(width):
+            if left <= x <= right and top <= y <= bottom:
+                continue
+            if max(abs(value - base) for value, base in zip(image.getpixel((x, y)), background)) > 24:
+                return x, y
+    return None
+
+
+@contextmanager
+def _artwork_image(artwork: Path, image_module):
+    """Yield artwork as a Pillow image, rasterizing vector sources at 300 DPI."""
 
     if artwork.suffix.lower() == ".png":
-        return image_module.open(artwork)
+        with image_module.open(artwork) as image:
+            image.load()
+            yield image
+        return
     import pymupdf
 
     document = pymupdf.open(artwork)
@@ -195,8 +273,14 @@ def _code_image(artwork: Path, image_module):
             raise ValueError("Artwork contains no pages to decode")
         page = document[0]
         pixmap = page.get_pixmap(dpi=300, alpha=False)
-        image = image_module.open(BytesIO(pixmap.tobytes("png")))
-        image.load()
-        return image
+        with image_module.open(BytesIO(pixmap.tobytes("png"))) as image:
+            image.load()
+            yield image
     finally:
         document.close()
+
+
+def _code_image(artwork: Path, image_module):
+    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+    with _artwork_image(artwork, image_module) as image:
+        return image.copy()
