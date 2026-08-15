@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -78,6 +79,42 @@ def test_artwork_inside_safe_margin_fails_validation(tmp_path):
         </svg>""",
         encoding="utf-8",
     )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
+def test_png_artwork_inside_safe_margin_fails_validation(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((10, 200, 30, 220), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
+def test_pdf_artwork_inside_safe_margin_fails_validation(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(page.rect, color=(1, 1, 1), fill=(1, 1, 1))
+    page.draw_rect(pymupdf.Rect(5, 100, 25, 120), color=(0, 0, 0), fill=(0, 0, 0))
+    document.save(artwork)
+    document.close()
     spec = LabelSpec.from_dict(
         {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
         tmp_path,
