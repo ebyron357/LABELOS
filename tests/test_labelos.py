@@ -57,9 +57,41 @@ def test_package_contains_verified_manifest(tmp_path):
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
+    contents = {path.name for path in manifest.parent.iterdir()}
+    assert contents == {"manifest.json", "label-spec.json", "passing-label.svg", "validation-report.json"}
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["schema_version"] == 2
+    assert manifest_data["artifacts"]["label_spec"]["file"] == "label-spec.json"
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+
+
+def test_package_verification_rejects_unexpected_files_and_invalid_report(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    (manifest.parent / "untracked.txt").write_text("unexpected", encoding="utf-8")
+    assert verify_package(manifest.parent) == ["Unexpected package artifact: untracked.txt"]
+    (manifest.parent / "untracked.txt").unlink()
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    assert "validation_report checksum mismatch: validation-report.json" in verify_package(manifest.parent)
+
+
+def test_invalid_pdf_is_reported_without_cli_crash(tmp_path, capsys):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}), encoding="utf-8"
+    )
+
+    assert main(["validate", str(config), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "PDF_INVALID"
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
