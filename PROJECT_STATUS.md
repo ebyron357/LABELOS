@@ -9,8 +9,12 @@
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+- Schema-v2 release directories containing copied artwork, normalized `label-spec.json`,
+  validation report, manifest, SHA-256 checksums, and byte counts.
+- Fail-closed package verification that rejects unsafe or duplicate artifact names, unexpected
+  files, symbolic links and other nonregular artifacts, invalid manifest metadata, spec/artwork
+  binding failures, and reports that did not pass.
+- Unreadable PDF artwork is reported as `PDF_INVALID` rather than crashing the CLI.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,11 +33,12 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-15 from commit `0ffa37f7c2186bbb5bd11eddfb73b69625af5fdc`:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 11 passed
 python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos          # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
 python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
@@ -41,7 +46,7 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
+Results: 11 tests passed; Ruff and bytecode compilation passed; the sdist and wheel were generated in `dist/`; and the
 end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
