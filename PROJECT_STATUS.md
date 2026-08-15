@@ -34,7 +34,7 @@
 ## Verification record
 
 Verified on 2026-08-15 from implementation commit
-`b49d3d825c49e9254d5f8f3f7abec6d3f8b8296d`:
+`b49d3d839ebe98e168f545fb7a04284bc91a5c20`:
 
 ```text
 python3 -m pytest -q                      # 14 passed
