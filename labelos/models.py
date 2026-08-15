@@ -39,6 +39,55 @@ class Report:
         }
 
 
+NATIVE_EVIDENCE_ARTIFACTS = ("evidence_json", "log", "preview_png", "native_artwork")
+
+
+@dataclass(frozen=True)
+class NativeEvidenceSpec:
+    """Declared native-build evidence. Every artifact is required once the block exists."""
+
+    root: Path
+    evidence_json: str | None = None
+    log: str | None = None
+    preview_png: str | None = None
+    native_artwork: str | None = None
+    required_layers: tuple[str, ...] = ()
+    required_objects: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: Any, root: Path) -> NativeEvidenceSpec:
+        if not isinstance(data, dict):
+            raise TypeError("native_evidence must be a JSON object")
+        allowed = set(NATIVE_EVIDENCE_ARTIFACTS) | {"required_layers", "required_objects"}
+        unknown = sorted(set(data) - allowed)
+        if unknown:
+            raise ValueError(f"Unknown native_evidence fields: {', '.join(unknown)}")
+        artifacts: dict[str, str | None] = {}
+        for key in NATIVE_EVIDENCE_ARTIFACTS:
+            if key not in data:
+                artifacts[key] = None
+                continue
+            value = data[key]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"native_evidence.{key} must be a non-empty string path")
+            artifacts[key] = value
+        return cls(
+            root=root.resolve(),
+            required_layers=_name_tuple(data, "required_layers"),
+            required_objects=_name_tuple(data, "required_objects"),
+            **artifacts,
+        )
+
+
+def _name_tuple(data: dict[str, Any], key: str) -> tuple[str, ...]:
+    value = data.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        raise ValueError(f"native_evidence.{key} must be a list of non-empty names")
+    if len(set(value)) != len(value):
+        raise ValueError(f"native_evidence.{key} must not contain duplicate names")
+    return tuple(value)
+
+
 @dataclass(frozen=True)
 class LabelSpec:
     artwork: Path
@@ -51,6 +100,7 @@ class LabelSpec:
     required_copy: tuple[str, ...] = ()
     barcode_value: str | None = None
     qr_value: str | None = None
+    native_evidence: NativeEvidenceSpec | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], root: Path) -> LabelSpec:
@@ -73,6 +123,11 @@ class LabelSpec:
         min_dpi = int(data.get("min_dpi", 300))
         if min_dpi <= 0:
             raise ValueError("min_dpi must be positive")
+        native_evidence = (
+            NativeEvidenceSpec.from_dict(data["native_evidence"], root)
+            if "native_evidence" in data
+            else None
+        )
         return cls(
             artwork=artwork,
             width_mm=width,
@@ -81,6 +136,7 @@ class LabelSpec:
             required_copy=tuple(str(value) for value in data.get("required_copy", [])),
             barcode_value=_optional_string(data.get("barcode_value")),
             qr_value=_optional_string(data.get("qr_value")),
+            native_evidence=native_evidence,
             **values,
         )
 

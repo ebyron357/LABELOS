@@ -8,6 +8,7 @@ from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
+from .evidence import validate_native_evidence
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
@@ -15,6 +16,7 @@ MM_PER_POINT = 25.4 / 72
 
 def validate(spec: LabelSpec) -> Report:
     report = Report(source=str(spec.artwork))
+    validate_native_evidence(spec, report)
     if not spec.artwork.is_file():
         report.add("ARTWORK_MISSING", "error", "Artwork file does not exist", str(spec.artwork))
         return report
