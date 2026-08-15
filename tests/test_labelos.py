@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -52,14 +53,53 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_invalid_pdf_is_a_validation_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 10, "height_mm": 10}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    assert contents["schema_version"] == 2
+    assert set(contents["files"]) == {"artwork", "label_spec", "validation_report"}
+    assert json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))["artwork"] == (
+        "passing-label.svg"
+    )
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_unbound_or_extra_artifacts(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    spec = json.loads((package / "label-spec.json").read_text(encoding="utf-8"))
+    spec["artwork"] = "other.svg"
+    (package / "label-spec.json").write_text(json.dumps(spec), encoding="utf-8")
+    assert "label_spec checksum mismatch: label-spec.json" in verify_package(package)
+
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    spec_path = package / "label-spec.json"
+    manifest_data["files"]["label_spec"]["sha256"] = hashlib.sha256(spec_path.read_bytes()).hexdigest()
+    manifest_data["files"]["label_spec"]["bytes"] = spec_path.stat().st_size
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+    assert verify_package(package) == ["label-spec.json does not bind to the packaged artwork"]
+
+    (package / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+    assert verify_package(package) == ["unexpected package files: unexpected.txt"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
