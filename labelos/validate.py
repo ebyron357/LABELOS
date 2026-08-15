@@ -8,6 +8,7 @@ from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
+from .evidence import check_native_evidence
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
@@ -15,9 +16,15 @@ MM_PER_POINT = 25.4 / 72
 
 def validate(spec: LabelSpec) -> Report:
     report = Report(source=str(spec.artwork))
+    _validate_artwork(spec, report)
+    check_native_evidence(spec, report)
+    return report
+
+
+def _validate_artwork(spec: LabelSpec, report: Report) -> None:
     if not spec.artwork.is_file():
         report.add("ARTWORK_MISSING", "error", "Artwork file does not exist", str(spec.artwork))
-        return report
+        return
 
     suffix = spec.artwork.suffix.lower()
     validators: dict[str, Callable[[LabelSpec, Report], str]] = {
@@ -28,7 +35,7 @@ def validate(spec: LabelSpec) -> Report:
     validator = validators.get(suffix)
     if validator is None:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
-        return report
+        return
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
@@ -40,7 +47,6 @@ def validate(spec: LabelSpec) -> Report:
         "safe_area_mm": spec.safe_area_mm,
         "min_dpi": spec.min_dpi,
     }
-    return report
 
 
 def _validate_png(spec: LabelSpec, report: Report) -> str:
