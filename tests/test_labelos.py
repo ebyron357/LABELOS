@@ -52,14 +52,67 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_uniform_full_bleed_background_passes_safe_area_validation(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+        <rect width="106" height="56" fill="white"/>
+        <rect x="5" y="5" width="10" height="10" fill="black"/>
+        </svg>""",
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    assert validate(spec).passed
+
+
+def test_artwork_inside_safe_margin_fails_validation(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+        <rect width="106" height="56" fill="white"/>
+        <rect x="1" y="20" width="2" height="2" fill="black"/>
+        </svg>""",
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    assert json.loads(manifest.read_text(encoding="utf-8"))["schema_version"] == 2
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_unsafe_manifest_and_unexpected_artifacts(tmp_path):
+    spec = passing_spec()
+    report = validate(spec)
+    manifest_path = create_package(spec, report, tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert "artwork file name is unsafe" in verify_package(manifest_path.parent)
+
+    manifest["artwork"]["file"] = "passing-label.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (manifest_path.parent / "unapproved.txt").write_text("unexpected", encoding="utf-8")
+    assert "unexpected package files: unapproved.txt" in verify_package(manifest_path.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
