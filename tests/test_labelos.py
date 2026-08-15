@@ -52,6 +52,29 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_malformed_pdf_fails_with_structured_error_without_cascading_checks(tmp_path):
+    artwork = tmp_path / "malformed.pdf"
+    artwork.write_bytes(b"%PDF-1.7\nthis is not a PDF")
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "required_copy": ["Product name"],
+            "barcode_value": "LABELOS-12345",
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+    assert report.metadata["artwork_readable"] is False
+    assert "required-copy" not in report.checks
+    assert "code-decode" not in report.checks
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)

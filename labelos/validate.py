@@ -30,6 +30,8 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    if report.metadata.get("artwork_readable") is False:
+        return report
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -118,7 +120,12 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.metadata["artwork_readable"] = False
+        report.add("PDF_INVALID", "error", f"PDF cannot be opened: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
