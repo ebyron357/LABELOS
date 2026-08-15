@@ -30,6 +30,7 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -144,6 +145,80 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject non-background artwork in the configured bleed-plus-safe-area margin."""
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        image = _safe_area_image(spec.artwork)
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+        return
+
+    try:
+        width, height = image.size
+        artwork_width = spec.width_mm + 2 * spec.bleed_mm
+        artwork_height = spec.height_mm + 2 * spec.bleed_mm
+        margin_x = round(width * (spec.bleed_mm + spec.safe_area_mm) / artwork_width)
+        margin_y = round(height * (spec.bleed_mm + spec.safe_area_mm) / artwork_height)
+        if margin_x <= 0 or margin_y <= 0 or margin_x * 2 >= width or margin_y * 2 >= height:
+            report.add("SAFE_AREA_UNCHECKABLE", "error", "Safe area cannot be mapped to artwork pixels")
+            return
+        background = _background_color(image)
+        bands = (
+            (0, 0, width, margin_y),
+            (0, height - margin_y, width, height),
+            (0, margin_y, margin_x, height - margin_y),
+            (width - margin_x, margin_y, width, height - margin_y),
+        )
+        if any(_has_non_background_pixels(image.crop(band), background) for band in bands):
+            report.add(
+                "SAFE_AREA_VIOLATION",
+                "error",
+                "Artwork content appears inside the bleed-plus-safe-area margin",
+            )
+    finally:
+        image.close()
+
+
+def _safe_area_image(artwork: Path):
+    from PIL import Image
+
+    if artwork.suffix.lower() == ".png":
+        with Image.open(artwork) as source:
+            return source.convert("RGB")
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError("Artwork must contain one page")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        with Image.open(BytesIO(pixmap.tobytes("png"))) as source:
+            return source.convert("RGB")
+    finally:
+        document.close()
+
+
+def _background_color(image) -> tuple[int, int, int]:
+    width, height = image.size
+    corners = (
+        image.getpixel((0, 0)),
+        image.getpixel((width - 1, 0)),
+        image.getpixel((0, height - 1)),
+        image.getpixel((width - 1, height - 1)),
+    )
+    return tuple(sorted(channel[index] for channel in corners)[len(corners) // 2] for index in range(3))
+
+
+def _has_non_background_pixels(image, background: tuple[int, int, int]) -> bool:
+    return any(
+        max(abs(channel - expected) for channel, expected in zip(pixel, background, strict=True)) > 16
+        for pixel in image.get_flattened_data()
+    )
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:

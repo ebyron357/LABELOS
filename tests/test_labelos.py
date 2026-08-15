@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -59,7 +60,23 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert "artwork checksum mismatch: passing-label.svg" in verify_package(manifest.parent)
+    assert "artwork byte count mismatch: passing-label.svg" in verify_package(manifest.parent)
+
+
+def test_package_rejects_unexpected_and_unsafe_manifest_artifacts(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    (package / "untracked.txt").write_text("unexpected", encoding="utf-8")
+    assert verify_package(package) == ["unexpected package artifacts: untracked.txt"]
+    content = json.loads(manifest.read_text(encoding="utf-8"))
+    content["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(content), encoding="utf-8")
+
+    failures = verify_package(package)
+
+    assert "artwork file name is unsafe" in failures
+    assert "unexpected package artifacts: passing-label.svg, untracked.txt" in failures
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -165,3 +182,65 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_safe_area_allows_a_uniform_full_bleed_svg_background(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm" '
+            'viewBox="0 0 100 100"><rect width="100" height="100" fill="#19324a"/>'
+            '<rect x="30" y="30" width="40" height="40" fill="#ffffff"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "safe_area_mm": 5},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_safe_area_rejects_png_content_in_protected_margin(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (100, 100), "white")
+    ImageDraw.Draw(image).rectangle((2, 40, 15, 60), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 25.4,
+            "height_mm": 25.4,
+            "safe_area_mm": 5,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["DPI_METADATA_MISSING", "SAFE_AREA_VIOLATION"]
+
+
+def test_safe_area_rejects_pdf_content_in_protected_margin(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=72, height=72)
+    page.draw_rect(pymupdf.Rect(0, 0, 72, 72), color=None, fill=(1, 1, 1))
+    page.draw_rect(pymupdf.Rect(1, 28, 12, 44), color=None, fill=(0, 0, 0))
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "safe_area_mm": 5},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert "SAFE_AREA_VIOLATION" in [issue.code for issue in report.issues]
