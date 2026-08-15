@@ -30,6 +30,10 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    if report.passed:
+        _validate_safe_area(spec, report)
+    if not report.passed:
+        return report
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -118,7 +122,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError) as error:
+        report.add("PDF_INVALID", "error", f"PDF cannot be opened: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -144,6 +152,50 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Fail artwork whose non-background pixels enter the bleed/safe-area margin."""
+    if spec.safe_area_mm <= 0:
+        return
+    try:
+        from PIL import Image, ImageChops
+
+        with _code_image(spec.artwork, Image) as image:
+            rgb = image.convert("RGB")
+            background = rgb.getpixel((0, 0))
+            if any(rgb.getpixel(point) != background for point in _corners(rgb.size)):
+                report.add(
+                    "SAFE_AREA_UNAVAILABLE",
+                    "error",
+                    "Safe-area inspection requires a uniform full-bleed corner background",
+                )
+                return
+            margin_mm = spec.bleed_mm + spec.safe_area_mm
+            x_margin = round(rgb.width * margin_mm / (spec.width_mm + 2 * spec.bleed_mm))
+            y_margin = round(rgb.height * margin_mm / (spec.height_mm + 2 * spec.bleed_mm))
+            if x_margin * 2 >= rgb.width or y_margin * 2 >= rgb.height:
+                report.add("SAFE_AREA_UNAVAILABLE", "error", "Safe area leaves no inspectable artwork area")
+                return
+            interior = rgb.crop((x_margin, y_margin, rgb.width - x_margin, rgb.height - y_margin))
+            canvas = Image.new("RGB", rgb.size, background)
+            canvas.paste(interior, (x_margin, y_margin))
+            if ImageChops.difference(rgb, canvas).getbbox():
+                report.add(
+                    "SAFE_AREA_CONTENT_OUTSIDE",
+                    "error",
+                    "Non-background content extends into the bleed or safe-area margin",
+                )
+                return
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNAVAILABLE", "error", f"Could not inspect safe area: {error}")
+        return
+    report.checks.append("safe-area")
+
+
+def _corners(size: tuple[int, int]) -> tuple[tuple[int, int], ...]:
+    width, height = size
+    return ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:

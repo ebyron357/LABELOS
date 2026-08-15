@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -52,14 +53,72 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_safe_area_allows_uniform_background_and_rejects_content_in_margin(tmp_path):
+    artwork = tmp_path / "safe-area.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    image.putpixel((100, 100), (0, 0, 0))
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+    assert validate(spec).passed
+
+    image.putpixel((20, 100), (0, 0, 0))
+    image.save(artwork)
+    report = validate(spec)
+    assert any(issue.code == "SAFE_AREA_CONTENT_OUTSIDE" for issue in report.issues)
+
+
+def test_invalid_pdf_reports_only_pdf_error(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "required_copy": ["required"]},
+        tmp_path,
+    )
+    report = validate(spec)
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
+    packaged_spec = json.loads((manifest.parent / "label-spec.json").read_text(encoding="utf-8"))
+    assert packaged_spec["artwork"] == "passing-label.svg"
+    assert packaged_spec["required_copy"] == ["Example Product", "NET 250 g"]
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "packaged file size mismatch: passing-label.svg",
+        "packaged file checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_rejects_unexpected_files_and_invalid_spec_binding(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    (manifest_path.parent / "unapproved.txt").write_text("not reviewed", encoding="utf-8")
+    assert verify_package(manifest_path.parent) == ["unexpected package file: unapproved.txt"]
+
+    (manifest_path.parent / "unapproved.txt").unlink()
+    packaged_spec = manifest_path.parent / "label-spec.json"
+    contents = json.loads(packaged_spec.read_text(encoding="utf-8"))
+    contents["artwork"] = "../outside.svg"
+    packaged_spec.write_text(json.dumps(contents), encoding="utf-8")
+    assert verify_package(manifest_path.parent) == [
+        "packaged file size mismatch: label-spec.json",
+        "packaged file checksum mismatch: label-spec.json",
+        "label specification does not reference a packaged artwork file",
+    ]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
