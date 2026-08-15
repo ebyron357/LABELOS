@@ -42,8 +42,11 @@ foreground outside the trim inset plus safe area. Uniform full-bleed backgrounds
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution, required
   copy, configured barcode/QR values, and a configured safe area.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+  report, a normalized label specification, and a SHA-256 manifest. Existing package
+  destinations are never overwritten.
+- `labelos verify-package DESTINATION`: verifies a schema-v2 manifest, checksums, byte counts,
+  artifact names, package contents, and the binding between the packaged artwork, spec, and
+  passing validation report.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 

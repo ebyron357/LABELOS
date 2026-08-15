@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -119,7 +120,29 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert "artwork checksum mismatch: passing-label.svg" in verify_package(manifest.parent)
+
+
+def test_package_rejects_unexpected_artifact(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+
+    (manifest.parent / "untracked.txt").write_text("unexpected", encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["unexpected package artifact: untracked.txt"]
+
+
+def test_package_rejects_passing_report_tampering_even_with_updated_checksum(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest_path.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest["artifacts"]["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == ["validation_report does not record a passing validation"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
