@@ -101,6 +101,34 @@ def test_package_verification_rejects_untracked_files(tmp_path):
     assert verify_package(manifest.parent) == ["package contains untracked files: unexpected.txt"]
 
 
+def test_package_verification_rejects_report_that_does_not_pass(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation_report does not contain a passing report"]
+
+
+def test_package_verification_rejects_report_with_mismatched_spec(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["metadata"]["spec"]["width_mm"] = 999
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation_report spec does not match manifest spec"]
+
+
 def test_safe_area_accepts_content_inside_bleed_and_safe_inset(tmp_path):
     artwork = tmp_path / "safe.png"
     image = Image.new("RGB", (1252, 661), "white")

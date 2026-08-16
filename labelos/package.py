@@ -24,7 +24,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "artwork": {
             "file": artwork_destination.name,
@@ -34,6 +34,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
         "validation_report": {
             "file": report_path.name,
             "sha256": _sha256(report_path),
+            "bytes": report_path.stat().st_size,
             "passed": report.passed,
         },
         "spec": report.metadata.get("spec", {}),
@@ -46,18 +47,21 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
 def verify_package(destination: Path) -> list[str]:
     """Return integrity failures for a release package."""
     manifest_path = destination / "manifest.json"
-    if not manifest_path.is_file():
-        return ["manifest.json is missing"]
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        return ["manifest.json is missing or not a regular file"]
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         return [f"manifest.json is invalid JSON: {error}"]
     if not isinstance(manifest, dict):
         return ["manifest.json must contain a JSON object"]
-    if manifest.get("schema_version") != 1:
+    if manifest.get("schema_version") != 2:
         return ["manifest.json has an unsupported schema_version"]
+    if not isinstance(manifest.get("spec"), dict):
+        return ["manifest.json has an invalid spec"]
     failures: list[str] = []
     declared_files = {"manifest.json"}
+    files: dict[str, Path] = {}
     for key in ("artwork", "validation_report"):
         entry = manifest.get(key)
         if not isinstance(entry, dict):
@@ -75,6 +79,7 @@ def verify_package(destination: Path) -> list[str]:
         if path.is_symlink() or not path.is_file():
             failures.append(f"{key} file is missing or not a regular file: {filename}")
             continue
+        files[key] = path
         expected_hash = entry.get("sha256")
         checksum_matches = False
         if not isinstance(expected_hash, str) or not _is_sha256(expected_hash):
@@ -84,12 +89,14 @@ def verify_package(destination: Path) -> list[str]:
             if not checksum_matches:
                 failures.append(f"{key} checksum mismatch: {filename}")
         expected_bytes = entry.get("bytes")
-        if key == "artwork" and checksum_matches and (
+        if checksum_matches and (
             not isinstance(expected_bytes, int)
             or isinstance(expected_bytes, bool)
             or expected_bytes != path.stat().st_size
         ):
             failures.append(f"{key} byte count mismatch: {filename}")
+    if not failures:
+        _verify_report(manifest, files["validation_report"], failures)
     if not failures and destination.is_dir():
         actual_files = {path.name for path in destination.iterdir()}
         unexpected = sorted(actual_files - declared_files)
@@ -105,6 +112,25 @@ def _is_package_filename(value: object) -> bool:
 
 def _is_sha256(value: str) -> bool:
     return len(value) == 64 and all(character in "0123456789abcdef" for character in value.lower())
+
+
+def _verify_report(manifest: dict, report_path: Path, failures: list[str]) -> None:
+    """Ensure a valid manifest cannot attest to a failed or unrelated report."""
+    report_entry = manifest["validation_report"]
+    if report_entry.get("passed") is not True:
+        failures.append("validation_report does not attest to a passing report")
+        return
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        failures.append(f"validation_report is invalid JSON: {error}")
+        return
+    if not isinstance(report, dict) or report.get("passed") is not True:
+        failures.append("validation_report does not contain a passing report")
+        return
+    metadata = report.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("spec") != manifest["spec"]:
+        failures.append("validation_report spec does not match manifest spec")
 
 
 def _sha256(path: Path) -> str:
