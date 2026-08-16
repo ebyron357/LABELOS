@@ -46,6 +46,14 @@ code was checked.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
+## Safe-area enforcement
+
+When `safe_area_mm` is greater than zero, LABELOS renders SVG and PDF artwork at 300 DPI and
+inspects all supported artwork for non-background pixels in the bleed-plus-safe margin. A
+uniform full-bleed background is allowed. Ambiguous edge backgrounds and transparent PNG
+artwork fail closed with `SAFE_AREA_UNCHECKABLE`; artwork in the protected margin fails with
+`SAFE_AREA_VIOLATION`.
+
 ## Current scope and limitations
 
 The core validator provides reproducible local checks and package integrity. Commercial
