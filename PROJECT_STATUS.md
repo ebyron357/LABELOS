@@ -34,7 +34,7 @@
 
 ## Verification record
 
-Verified on 2026-08-16 before the final commit for this change:
+Verified on 2026-08-16 from commit `4fbfe68`:
 
 ```text
 python3 -m pytest -q                      # 16 passed
@@ -48,6 +48,8 @@ python3 -m labelos.cli doctor --json
 
 Results: 16 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
 end-to-end package was created and checksum-verified at `/tmp/labelos-production-e2e`.
+The built wheel was also installed to `/tmp/labelos-wheel-target` and successfully ran the
+validate/package/verify-package/doctor workflow against `/tmp/labelos-wheel-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. Safe-area regression tests cover passing PNG artwork plus failing PNG,
