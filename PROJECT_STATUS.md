@@ -4,7 +4,8 @@
 
 - JSON label specification validation with physical dimensions, bleed, safe-area sanity,
   minimum DPI, and required-copy fields.
-- SVG, PNG, and PDF artwork validation through bundled PyMuPDF.
+- SVG, PNG, and PDF artwork validation through bundled PyMuPDF. Malformed PDFs fail with a
+  structured `PDF_INVALID` validation result rather than crashing the operator CLI.
 - Fail-closed safe-area validation for SVG, PNG, and PDF artwork. Uniform full-bleed
   backgrounds are allowed; non-background content in `bleed_mm + safe_area_mm` fails with
   `SAFE_AREA_VIOLATION`, and an uninspectable edge fails with `SAFE_AREA_UNCHECKABLE`.
@@ -34,35 +35,36 @@
 ## Verification record
 
 Verified on 2026-08-16 from implementation commit
-`26b7ecf02464d20f3ed21c4eb39eb192aa07701d`:
+`fbf185532ee3e12727e9f1f2e4c7e6784d3a2e0e`:
 
 ```text
-python3 -m pytest -q                      # 14 passed
+python3 -m pytest -q                      # 15 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-production-build-20260816-final
+python3 -m build --outdir /tmp/labelos-production-build-20260816-pdf
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-production-e2e-20260816-final --json
-python3 -m labelos.cli verify-package /tmp/labelos-production-e2e-20260816-final --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-production-e2e-20260816-pdf --json
+python3 -m labelos.cli verify-package /tmp/labelos-production-e2e-20260816-pdf --json
 python3 -m labelos.cli doctor --json
-python3 -m pip install --target /tmp/labelos-wheel-target-20260816-final \
-  /tmp/labelos-production-build-20260816-final/*.whl
-PYTHONPATH=/tmp/labelos-wheel-target-20260816-final python3 -m labelos.cli \
+python3 -m pip install --target /tmp/labelos-wheel-target-20260816-pdf \
+  /tmp/labelos-production-build-20260816-pdf/*.whl
+PYTHONPATH=/tmp/labelos-wheel-target-20260816-pdf python3 -m labelos.cli \
   validate examples/label.json --json
-PYTHONPATH=/tmp/labelos-wheel-target-20260816-final python3 -m labelos.cli \
-  package examples/label.json /tmp/labelos-wheel-e2e-20260816-final --json
-PYTHONPATH=/tmp/labelos-wheel-target-20260816-final python3 -m labelos.cli \
-  verify-package /tmp/labelos-wheel-e2e-20260816-final --json
+PYTHONPATH=/tmp/labelos-wheel-target-20260816-pdf python3 -m labelos.cli \
+  package examples/label.json /tmp/labelos-wheel-e2e-20260816-pdf --json
+PYTHONPATH=/tmp/labelos-wheel-target-20260816-pdf python3 -m labelos.cli \
+  verify-package /tmp/labelos-wheel-e2e-20260816-pdf --json
 ```
 
-Results: 14 tests passed; Ruff, compilation, and dependency checks passed; the sdist and wheel
-were generated in `/tmp/labelos-production-build-20260816-final`; the source-tree package was
+Results: 15 tests passed; Ruff, compilation, and dependency checks passed; the sdist and wheel
+were generated in `/tmp/labelos-production-build-20260816-pdf`; the source-tree package was
 created and schema/checksum/byte-count verified at
-`/tmp/labelos-production-e2e-20260816-final`; and the same workflow passed from the built wheel
-at `/tmp/labelos-wheel-e2e-20260816-final`. `doctor` confirmed PyMuPDF and ZXing-C++ are
+`/tmp/labelos-production-e2e-20260816-pdf`; and the same workflow passed from the built wheel
+at `/tmp/labelos-wheel-e2e-20260816-pdf`. `doctor` confirmed PyMuPDF and ZXing-C++ are
 available; Callas pdfToolbox remains unavailable. QR and Code 128 regression tests generate
-raster, SVG, and PDF fixtures and verify their decoded expected values. Safe-area tests cover
+raster, SVG, and PDF fixtures and verify their decoded expected values. A malformed-PDF regression
+test verifies both a `PDF_INVALID` report and CLI exit code 1. Safe-area tests cover
 passing SVG artwork and failing PNG/PDF artwork; manifest tests cover checksum, byte-count,
 path-traversal, and unexpected-file rejection. GitHub Actions runs tests, lint, and builds on
 Python 3.10 and 3.12.
