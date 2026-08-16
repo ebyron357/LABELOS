@@ -31,7 +31,8 @@
 
 ## Verification record
 
-Verified on 2026-08-16 from working tree based on commit `1e86abd08646dfef720fc2f45fa168846527aec5`:
+Verified on 2026-08-16 for release-verification commit
+`66581b1d1be3c8f2c7bf9a4f4540c28a66a11c20`:
 
 ```text
 python3 -m pytest -q                      # 13 passed
