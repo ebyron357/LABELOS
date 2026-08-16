@@ -73,6 +73,12 @@ def _safe_area_image(artwork: Path, image_module):
     if artwork.suffix.lower() == ".png":
         image = image_module.open(artwork)
         image.load()
+        try:
+            if "A" in image.getbands() and image.getchannel("A").getextrema()[0] < 255:
+                raise ValueError("transparent raster artwork has no verifiable edge background")
+            return image.convert("RGB")
+        finally:
+            image.close()
     else:
         import pymupdf
 
@@ -83,9 +89,12 @@ def _safe_area_image(artwork: Path, image_module):
             pixmap = document[0].get_pixmap(dpi=300, alpha=False)
             image = image_module.open(BytesIO(pixmap.tobytes("png")))
             image.load()
+            try:
+                return image.convert("RGB")
+            finally:
+                image.close()
         finally:
             document.close()
-    return image.convert("RGB")
 
 
 def _inspect_safe_area(spec: LabelSpec, image, report: Report) -> None:

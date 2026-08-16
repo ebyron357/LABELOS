@@ -94,6 +94,16 @@ def test_png_safe_area_flags_content_in_protected_margin(tmp_path):
     assert "SAFE_AREA_VIOLATION" in [issue.code for issue in report.issues]
 
 
+def test_png_safe_area_fails_closed_for_transparent_artwork(tmp_path):
+    artwork = tmp_path / "transparent.png"
+    Image.new("RGBA", (144, 144), (255, 255, 255, 0)).save(artwork, dpi=(304.8, 304.8))
+
+    report = validate(_safe_area_spec(artwork, tmp_path))
+
+    assert not report.passed
+    assert "SAFE_AREA_UNCHECKABLE" in [issue.code for issue in report.issues]
+
+
 def test_pdf_safe_area_flags_content_in_protected_margin(tmp_path):
     artwork = tmp_path / "unsafe.pdf"
     document = pymupdf.open()
@@ -133,6 +143,15 @@ def test_package_rejects_manifest_path_traversal_and_unexpected_files(tmp_path):
 
     assert "artwork file path is unsafe" in failures
     assert "unexpected package files: notes.txt, passing-label.svg" in failures
+
+
+def test_package_rejects_dot_segment_manifest_path(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = ".."
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "artwork file path is unsafe" in verify_package(manifest_path.parent)
 
 
 def test_package_rejects_manifest_byte_count_tampering(tmp_path):

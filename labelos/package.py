@@ -96,7 +96,11 @@ def verify_package(destination: Path) -> list[str]:
 
 def _package_file(destination: Path, value: object) -> Path | None:
     """Return a manifest file only when it is a single safe package-relative name."""
-    if not isinstance(value, str) or not value or Path(value).name != value:
+    if (
+        not isinstance(value, str)
+        or value in {"", ".", ".."}
+        or Path(value).name != value
+    ):
         return None
     return destination / value
 
