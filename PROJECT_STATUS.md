@@ -32,8 +32,8 @@
 
 ## Verification record
 
-Verified on 2026-08-16 from the working tree based on
-`1e86abdfb7e876f540dc209dfd102d7c7a7056b3`:
+Verified on 2026-08-16 from commit
+`f875bf8e6b37ac58331adaac7de24deeb5096fbd`:
 
 ```text
 python3 -m pytest -q                      # 13 passed
