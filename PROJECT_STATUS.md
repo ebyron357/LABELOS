@@ -31,8 +31,8 @@
 
 ## Verification record
 
-Verified on 2026-08-16 from the working tree based on commit
-`1e86abd fix: restore vector code decoding and CI readiness (#6)`:
+Verified on 2026-08-16 from release-hardening commit
+`92fe92b fix: harden release package verification`:
 
 ```text
 python3 -m pytest -q                      # 15 passed
