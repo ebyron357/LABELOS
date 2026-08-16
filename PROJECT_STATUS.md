@@ -32,8 +32,8 @@
 
 ## Verification record
 
-Verified on 2026-08-16 from the working tree based on commit
-`1e86abd` (the resulting commit is recorded in this run's delivery):
+Verified on 2026-08-16 in production-safeguard commit
+`23c72625fd279613299af095ff5f24b14bf16a7e`:
 
 ```text
 python3 -m pytest -q --cache-clear        # 13 passed
