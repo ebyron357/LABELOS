@@ -33,25 +33,27 @@
 
 ## Verification record
 
-Verified on 2026-08-15 (commit recorded after this verification):
+Verified on 2026-08-16 against production-control commits `6e5373bd127207e5098283cea8ad006bf47843bc`
+and `8e6e594799248aaa5d196ee4f6044fdf4fbce49e`:
 
 ```text
-python3 -m pytest -q                      # 14 passed
+python3 -m pytest -q --cache-clear        # 16 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-production-build-1786763701
+python3 -m build --outdir /tmp/labelos-build-1774-final
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-1774-complete --json
+python3 -m labelos.cli verify-package /tmp/labelos-e2e-1774-complete --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 14 tests passed; Ruff, compilation, and dependency checks passed; the sdist and wheel
-were generated in `/tmp/labelos-production-build-1786763701`; and the end-to-end package was
-created and schema/checksum/byte-count verified at `/tmp/labelos-production-e2e-1786763701`.
+Results: 16 tests passed; Ruff, compilation, and dependency checks passed; the sdist and wheel
+were generated in `/tmp/labelos-build-1774-final`; and the end-to-end package was created and
+schema/checksum/byte-count verified at `/tmp/labelos-e2e-1774-complete`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. Safe-area tests cover passing SVG artwork and failing PNG/PDF artwork;
-manifest tests cover checksum, byte-count, path-traversal, and unexpected-file rejection.
+decoded expected values. Safe-area tests cover passing SVG artwork, failing PNG/PDF artwork, and
+transparent PNG failure. Manifest tests cover checksum, byte-count, dot-segment and traversal
+paths, and unexpected-file rejection.
 GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
