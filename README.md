@@ -42,11 +42,15 @@ code was checked.
   required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+- `labelos verify-package DESTINATION`: fail-closed verification of the release manifest,
+  expected regular files, byte counts, SHA-256 checksums, and passing validation report.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
 ## Current scope and limitations
+
+Release manifests use schema version 2; legacy or malformed manifests, unsafe paths, symlinks,
+unexpected package files, checksum/byte-count mismatches, and inconsistent reports are rejected.
 
 The core validator provides reproducible local checks and package integrity. Commercial
 prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
