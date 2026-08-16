@@ -60,7 +60,34 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_rejects_unsafe_manifest_paths_and_unexpected_files(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (manifest_path.parent / "notes.txt").write_text("unexpected", encoding="utf-8")
+
+    failures = verify_package(manifest_path.parent)
+
+    assert "artwork file path is unsafe" in failures
+    assert "unexpected package files: notes.txt, passing-label.svg" in failures
+
+
+def test_package_rejects_manifest_byte_count_tampering(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["bytes"] -= 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == ["validation_report byte count mismatch: validation-report.json"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
