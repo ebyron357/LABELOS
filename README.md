@@ -43,9 +43,10 @@ code was checked.
   rasterizes vector artwork at 300 DPI and fails closed if it cannot establish a uniform
   canvas background.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
+  report, and a schema-v2 SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies manifest structure, approved checksum
-  entries, regular package files, byte counts, and rejects untracked release files.
+  entries, regular package files, byte counts, a passing validation report whose spec matches
+  the manifest, and rejects untracked release files.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
