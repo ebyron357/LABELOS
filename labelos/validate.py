@@ -11,6 +11,7 @@ from pathlib import Path
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+SAFE_AREA_RENDER_DPI = 300
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -30,6 +31,7 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -154,6 +156,74 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
             report.add("REQUIRED_COPY_MISSING", "error", f"Required copy not found: {value!r}")
 
 
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure visible artwork remains within the configured trim-safe boundary."""
+    if spec.safe_area_mm == 0:
+        return
+    try:
+        from PIL import Image, ImageChops
+
+        with _raster_image(spec.artwork, Image, alpha=True) as image:
+            rgba = image.convert("RGBA")
+            background = _canvas_background(rgba)
+            if background is None:
+                report.add(
+                    "SAFE_AREA_UNVERIFIABLE",
+                    "error",
+                    "Safe area cannot be checked because artwork has no unambiguous canvas background",
+                )
+                return
+            difference = ImageChops.difference(
+                rgba.convert("RGB"), Image.new("RGB", rgba.size, background)
+            )
+            bbox = difference.getbbox()
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", f"Could not inspect safe area: {error}")
+        return
+
+    report.checks.append("safe-area")
+    if bbox is None:
+        report.metadata["safe_area"] = {"content_bbox_px": None}
+        return
+    width_px, height_px = rgba.size
+    full_width_mm = spec.width_mm + 2 * spec.bleed_mm
+    full_height_mm = spec.height_mm + 2 * spec.bleed_mm
+    horizontal_margin = (spec.bleed_mm + spec.safe_area_mm) * width_px / full_width_mm
+    vertical_margin = (spec.bleed_mm + spec.safe_area_mm) * height_px / full_height_mm
+    left, top, right, bottom = bbox
+    report.metadata["safe_area"] = {
+        "content_bbox_px": dict(zip(("left", "top", "right", "bottom"), bbox)),
+        "required_margin_mm": spec.bleed_mm + spec.safe_area_mm,
+    }
+    outside_safe_area = (
+        left < horizontal_margin
+        or top < vertical_margin
+        or right > width_px - horizontal_margin
+        or bottom > height_px - vertical_margin
+    )
+    if outside_safe_area:
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            "Visible artwork extends outside the configured trim-safe area",
+        )
+
+
+def _canvas_background(image) -> tuple[int, int, int] | None:
+    """Return a stable visible corner color, or ``None`` when it is ambiguous."""
+    width, height = image.size
+    corners = (
+        image.getpixel((0, 0)),
+        image.getpixel((width - 1, 0)),
+        image.getpixel((0, height - 1)),
+        image.getpixel((width - 1, height - 1)),
+    )
+    colors = {color[:3] for color in corners if color[3] > 0}
+    if len(colors) != 1 or any(color[3] == 0 for color in corners):
+        return None
+    return colors.pop()
+
+
 def _validate_codes(spec: LabelSpec, report: Report) -> None:
     expectations = (("barcode", spec.barcode_value), ("qr", spec.qr_value))
     if not any(value for _, value in expectations):
@@ -170,7 +240,7 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         )
         return
     try:
-        with _code_image(spec.artwork, Image) as image:
+        with _raster_image(spec.artwork, Image) as image:
             results = zxingcpp.read_barcodes(image)
     except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
@@ -182,8 +252,8 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
 
 
-def _code_image(artwork: Path, image_module):
-    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+def _raster_image(artwork: Path, image_module, *, alpha: bool = False):
+    """Return artwork as a Pillow image, rasterizing vector sources when needed."""
 
     if artwork.suffix.lower() == ".png":
         return image_module.open(artwork)
@@ -194,7 +264,7 @@ def _code_image(artwork: Path, image_module):
         if document.page_count < 1:
             raise ValueError("Artwork contains no pages to decode")
         page = document[0]
-        pixmap = page.get_pixmap(dpi=300, alpha=False)
+        pixmap = page.get_pixmap(dpi=SAFE_AREA_RENDER_DPI, alpha=alpha)
         image = image_module.open(BytesIO(pixmap.tobytes("png")))
         image.load()
         return image

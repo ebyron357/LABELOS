@@ -52,6 +52,83 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_safe_area_allows_artwork_inside_trim_margin(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+        <rect width="106" height="56" fill="#fff"/>
+        <rect x="6" y="6" width="10" height="10" fill="#000"/>
+        </svg>""",
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_safe_area_rejects_artwork_inside_trim_margin(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+        <rect width="106" height="56" fill="#fff"/>
+        <rect x="4" y="6" width="10" height="10" fill="#000"/>
+        </svg>""",
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_safe_area_fails_closed_for_transparent_canvas(tmp_path):
+    from PIL import Image
+
+    artwork = tmp_path / "transparent.png"
+    image = Image.new("RGBA", (1060, 560), (0, 0, 0, 0))
+    image.putpixel((100, 100), (0, 0, 0, 255))
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_UNVERIFIABLE" for issue in report.issues)
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
