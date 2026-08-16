@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -52,6 +53,62 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def _safe_area_spec(artwork: Path) -> LabelSpec:
+    return LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        artwork.parent,
+    )
+
+
+def test_safe_area_allows_content_inside_protected_boundary(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((50, 50, 1009, 509), fill="black")
+    image.save(artwork)
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert report.passed
+    assert report.metadata["safe_area"]["protected_pixels"] == 0
+
+
+def test_safe_area_rejects_content_in_protected_boundary(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((49, 50, 1009, 509), fill="black")
+    image.save(artwork)
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_safe_area_fails_closed_for_transparent_artwork(tmp_path):
+    artwork = tmp_path / "transparent.png"
+    Image.new("RGBA", (1060, 560), (255, 255, 255, 0)).save(artwork)
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert any(issue.code == "SAFE_AREA_UNCHECKABLE" for issue in report.issues)
+
+
+def test_malformed_pdf_returns_validation_error(tmp_path):
+    artwork = tmp_path / "broken.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert any(issue.code == "PDF_INVALID" for issue in report.issues)
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -59,7 +116,23 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert "artwork checksum mismatch: passing-label.svg" in verify_package(manifest.parent)
+
+
+def test_package_verification_rejects_unsafe_or_unexpected_contents(tmp_path):
+    spec = passing_spec()
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    assert "artwork file name is unsafe" in verify_package(manifest.parent)
+
+    manifest_data["artwork"]["file"] = "passing-label.svg"
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+    (manifest.parent / "notes.txt").write_text("unexpected", encoding="utf-8")
+    assert "package contains unexpected files: notes.txt" in verify_package(manifest.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

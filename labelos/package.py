@@ -24,7 +24,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "artwork": {
             "file": artwork_destination.name,
@@ -34,6 +34,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
         "validation_report": {
             "file": report_path.name,
             "sha256": _sha256(report_path),
+            "bytes": report_path.stat().st_size,
             "passed": report.passed,
         },
         "spec": report.metadata.get("spec", {}),
@@ -46,20 +47,48 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
 def verify_package(destination: Path) -> list[str]:
     """Return integrity failures for a release package."""
     manifest_path = destination / "manifest.json"
-    if not manifest_path.is_file():
+    if destination.is_symlink() or not destination.is_dir():
+        return ["package destination is missing or unsafe"]
+    if manifest_path.is_symlink() or not manifest_path.is_file():
         return ["manifest.json is missing"]
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return [f"manifest.json is invalid JSON: {error}"]
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 2:
+        return ["manifest.json has an unsupported schema version"]
     failures = []
+    expected_files = {"manifest.json"}
     for key in ("artwork", "validation_report"):
         entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
-        if not path.is_file():
-            failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
-            failures.append(f"{key} checksum mismatch: {path.name}")
+        if not isinstance(entry, dict):
+            failures.append(f"{key} manifest entry is invalid")
+            continue
+        filename = entry.get("file")
+        if not isinstance(filename, str) or not filename or Path(filename).name != filename:
+            failures.append(f"{key} file name is unsafe")
+            continue
+        expected_files.add(filename)
+        path = destination / filename
+        if path.is_symlink() or not path.is_file():
+            failures.append(f"{key} file is missing or unsafe: {filename}")
+            continue
+        if entry.get("sha256") != _sha256(path):
+            failures.append(f"{key} checksum mismatch: {filename}")
+        if not isinstance(entry.get("bytes"), int) or entry["bytes"] != path.stat().st_size:
+            failures.append(f"{key} byte size mismatch: {filename}")
+        if key == "validation_report":
+            try:
+                report = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                failures.append(f"validation report is invalid JSON: {error}")
+            else:
+                if not isinstance(report, dict) or report.get("passed") is not True:
+                    failures.append("validation report does not record a passing validation")
+    actual_files = {path.name for path in destination.iterdir()}
+    unexpected_files = actual_files - expected_files
+    if unexpected_files:
+        failures.append(f"package contains unexpected files: {', '.join(sorted(unexpected_files))}")
     return failures
 
 
