@@ -118,7 +118,27 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork byte-size mismatch: passing-label.svg" in failures
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+
+
+def test_verify_package_rejects_unsafe_manifest_path(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "artwork file path is unsafe" in verify_package(manifest_path.parent)
+
+
+def test_verify_package_rejects_unexpected_files(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    (manifest_path.parent / "untracked.txt").write_text("untracked", encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == ["unexpected package files: untracked.txt"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
