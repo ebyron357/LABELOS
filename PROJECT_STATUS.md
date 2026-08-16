@@ -5,6 +5,9 @@
 - JSON label specification validation with physical dimensions, bleed, safe-area sanity,
   minimum DPI, and required-copy fields.
 - SVG, PNG, and PDF artwork validation through bundled PyMuPDF.
+- Safe-area validation rasterizes SVG/PDF artwork at 300 DPI and rejects non-background
+  artwork in the bleed plus configured protected margin. It fails closed if a raster has no
+  visible content or an asset's outer corners do not establish a uniform bleed background.
 - QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
@@ -29,20 +32,31 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-16 from the safe-area validation change:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q --cache-clear        # 13 passed
 python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos tests    # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-safe-area-e2e --json
+python3 -m labelos.cli verify-package /tmp/labelos-safe-area-e2e --json
 python3 -m labelos.cli doctor --json
+python3 -m pip check
+python3 -m pip install --no-deps --target /tmp/labelos-wheel-target dist/labelos-0.1.0-py3-none-any.whl
+PYTHONPATH=/tmp/labelos-wheel-target python3 -m labelos.cli package examples/label.json /tmp/labelos-wheel-e2e --json
+PYTHONPATH=/tmp/labelos-wheel-target python3 -m labelos.cli verify-package /tmp/labelos-wheel-e2e --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
-`doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
-QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+Results: 13 tests passed, including passing SVG, failing PNG/PDF, and transparent-raster
+safe-area cases; Ruff, bytecode compilation, and dependency checks passed; the sdist and
+wheel were generated in `dist/`; and the end-to-end package was created and checksum-verified
+at `/tmp/labelos-safe-area-e2e`. The built wheel was installed into
+`/tmp/labelos-wheel-target` and its package/verification workflow passed at
+`/tmp/labelos-wheel-e2e`. A virtualenv-based isolated-wheel test is blocked by this image's
+missing `ensurepip`/`python3-venv`; this is an environment limitation, not treated as a
+package pass. `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains
+TOOL UNAVAILABLE/BLOCKED. QR and Code 128 regression tests generate raster, SVG, and PDF
+fixtures and verify their decoded expected values. GitHub Actions runs tests, lint, and builds
+on Python 3.10 and 3.12.
