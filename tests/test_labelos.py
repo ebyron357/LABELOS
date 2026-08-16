@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -50,6 +51,64 @@ def test_dimension_mismatch_fails():
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
     )
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def test_safe_area_accepts_content_inside_protected_boundary(tmp_path):
+    artwork = tmp_path / "safe-area.png"
+    image = Image.new("RGB", (100, 50), "white")
+    ImageDraw.Draw(image).rectangle((3, 3, 96, 46), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["safe_area"]["content_bounds_px"] == [3, 3, 96, 46]
+
+
+def test_safe_area_rejects_content_in_protected_boundary(tmp_path):
+    artwork = tmp_path / "unsafe-area.png"
+    image = Image.new("RGB", (100, 50), "white")
+    ImageDraw.Draw(image).rectangle((1, 3, 96, 46), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
+def test_safe_area_rejects_transparent_artwork(tmp_path):
+    artwork = tmp_path / "transparent.png"
+    Image.new("RGBA", (100, 50), (255, 255, 255, 0)).save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_UNCHECKABLE" for issue in validate(spec).issues)
 
 
 def test_package_contains_verified_manifest(tmp_path):

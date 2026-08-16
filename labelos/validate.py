@@ -30,6 +30,7 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -86,6 +87,100 @@ def _validate_pixel_dimensions(
             "error",
             f"Effective resolution {min(actual):.1f} DPI is below {spec.min_dpi} DPI",
         )
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject artwork content inside the configured bleed plus safe-area boundary."""
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        image = _safe_area_image(spec.artwork, Image).convert("RGBA")
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+        return
+
+    pixels = list(image.get_flattened_data())
+    if any(alpha != 255 for _, _, _, alpha in pixels):
+        report.add(
+            "SAFE_AREA_UNCHECKABLE",
+            "error",
+            "Artwork has transparency; a uniform bleed background is required for safe-area checks",
+        )
+        return
+
+    edge_pixels = (
+        [image.getpixel((x, 0)) for x in range(image.width)]
+        + [image.getpixel((x, image.height - 1)) for x in range(image.width)]
+        + [image.getpixel((0, y)) for y in range(1, image.height - 1)]
+        + [image.getpixel((image.width - 1, y)) for y in range(1, image.height - 1)]
+    )
+    background = edge_pixels[0][:3]
+    if any(_color_distance(pixel[:3], background) > 10 for pixel in edge_pixels):
+        report.add(
+            "SAFE_AREA_UNCHECKABLE",
+            "error",
+            "Artwork edges are not a uniform bleed background; safe area cannot be determined",
+        )
+        return
+
+    content = [
+        (index % image.width, index // image.width)
+        for index, pixel in enumerate(pixels)
+        if _color_distance(pixel[:3], background) > 10
+    ]
+    if not content:
+        report.metadata["safe_area"] = {"content_bounds_px": None}
+        return
+    left = min(x for x, _ in content)
+    top = min(y for _, y in content)
+    right = max(x for x, _ in content)
+    bottom = max(y for _, y in content)
+    report.metadata["safe_area"] = {"content_bounds_px": [left, top, right, bottom]}
+
+    total_width = spec.width_mm + 2 * spec.bleed_mm
+    total_height = spec.height_mm + 2 * spec.bleed_mm
+    protected_mm = spec.bleed_mm + spec.safe_area_mm
+    protected_left = protected_mm * image.width / total_width
+    protected_top = protected_mm * image.height / total_height
+    protected_right = image.width - protected_left
+    protected_bottom = image.height - protected_top
+    if (
+        left + 0.5 < protected_left
+        or top + 0.5 < protected_top
+        or right + 0.5 > protected_right
+        or bottom + 0.5 > protected_bottom
+    ):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            f"Content bounds {left},{top}–{right},{bottom} px enter the {protected_mm:g} mm protected edge area",
+        )
+
+
+def _safe_area_image(artwork: Path, image_module):
+    if artwork.suffix.lower() == ".png":
+        with image_module.open(artwork) as source:
+            source.load()
+            return source.copy()
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"expected one page, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        with image_module.open(BytesIO(pixmap.tobytes("png"))) as source:
+            source.load()
+            return source.copy()
+    finally:
+        document.close()
+
+
+def _color_distance(first: tuple[int, int, int], second: tuple[int, int, int]) -> int:
+    return max(abs(left - right) for left, right in zip(first, second, strict=True))
 
 
 def _validate_svg(spec: LabelSpec, report: Report) -> str:
