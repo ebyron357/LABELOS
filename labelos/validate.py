@@ -30,6 +30,8 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    if spec.safe_area_mm and report.passed:
+        _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -41,6 +43,113 @@ def validate(spec: LabelSpec) -> Report:
         "min_dpi": spec.min_dpi,
     }
     return report
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure visible content stays within the configured post-trim safe area.
+
+    A uniform full-bleed background is excluded from occupancy.  Artwork whose
+    edge background is ambiguous fails closed rather than claiming it passed.
+    """
+
+    report.checks.append("safe-area")
+    try:
+        image = _safe_area_image(spec.artwork)
+        bounds = _occupied_bounds_px(image)
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+        return
+    if bounds is None:
+        report.add(
+            "SAFE_AREA_UNCHECKABLE",
+            "error",
+            "Artwork edges are not a uniform background; safe-area occupancy cannot be determined",
+        )
+        return
+    if bounds == (0, 0, -1, -1):
+        report.metadata["safe_area"] = {"occupied_bounds_mm": None}
+        return
+
+    artwork_width = spec.width_mm + 2 * spec.bleed_mm
+    artwork_height = spec.height_mm + 2 * spec.bleed_mm
+    left = top = spec.bleed_mm + spec.safe_area_mm
+    right = spec.bleed_mm + spec.width_mm - spec.safe_area_mm
+    bottom = spec.bleed_mm + spec.height_mm - spec.safe_area_mm
+    x0, y0, x1, y1 = bounds
+    occupied = {
+        "left": round(x0 / image.width * artwork_width, 3),
+        "top": round(y0 / image.height * artwork_height, 3),
+        "right": round((x1 + 1) / image.width * artwork_width, 3),
+        "bottom": round((y1 + 1) / image.height * artwork_height, 3),
+    }
+    report.metadata["safe_area"] = {
+        "bounds_mm": {"left": left, "top": top, "right": right, "bottom": bottom},
+        "occupied_bounds_mm": occupied,
+    }
+
+    # One raster pixel avoids false failures from antialiasing at the exact boundary.
+    tolerance_x = artwork_width / image.width
+    tolerance_y = artwork_height / image.height
+    if (
+        occupied["left"] < left - tolerance_x
+        or occupied["top"] < top - tolerance_y
+        or occupied["right"] > right + tolerance_x
+        or occupied["bottom"] > bottom + tolerance_y
+    ):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            (
+                "Visible artwork occupies "
+                f"{occupied['left']:.2f},{occupied['top']:.2f}–"
+                f"{occupied['right']:.2f},{occupied['bottom']:.2f} mm; "
+                f"safe area is {left:.2f},{top:.2f}–{right:.2f},{bottom:.2f} mm"
+            ),
+        )
+
+
+def _safe_area_image(artwork: Path):
+    from PIL import Image
+
+    if artwork.suffix.lower() == ".png":
+        with Image.open(artwork) as source:
+            return source.convert("RGBA")
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Artwork must contain one page, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        with Image.open(BytesIO(pixmap.tobytes("png"))) as source:
+            return source.convert("RGBA")
+    finally:
+        document.close()
+
+
+def _occupied_bounds_px(image) -> tuple[int, int, int, int] | None:
+    """Return non-background pixel bounds, or None for ambiguous edge pixels."""
+
+    pixels = image.load()
+    corners = (
+        pixels[0, 0],
+        pixels[image.width - 1, 0],
+        pixels[0, image.height - 1],
+        pixels[image.width - 1, image.height - 1],
+    )
+    if len(set(corners)) != 1:
+        return None
+    background = corners[0]
+    left, top, right, bottom = image.width, image.height, -1, -1
+    for y in range(image.height):
+        for x in range(image.width):
+            pixel = pixels[x, y]
+            if max(abs(pixel[index] - background[index]) for index in range(4)) > 8:
+                left, top = min(left, x), min(top, y)
+                right, bottom = max(right, x), max(bottom, y)
+    if right == -1:
+        return (0, 0, -1, -1)
+    return left, top, right, bottom
 
 
 def _validate_png(spec: LabelSpec, report: Report) -> str:

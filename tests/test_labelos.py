@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -52,6 +53,74 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def _safe_area_spec(artwork: Path) -> LabelSpec:
+    return LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 10,
+            "height_mm": 10,
+            "bleed_mm": 1,
+            "safe_area_mm": 1,
+            "min_dpi": 300,
+        },
+        artwork.parent,
+    )
+
+
+def test_png_safe_area_allows_content_inside_safe_bounds(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGB", (144, 144), "white")
+    ImageDraw.Draw(image).rectangle((25, 25, 118, 118), fill="black")
+    image.save(artwork, dpi=(304.8, 304.8))
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_png_safe_area_rejects_content_in_protected_margin(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (144, 144), "white")
+    ImageDraw.Draw(image).rectangle((5, 60, 80, 80), fill="black")
+    image.save(artwork, dpi=(304.8, 304.8))
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert not report.passed
+    assert "SAFE_AREA_VIOLATION" in [issue.code for issue in report.issues]
+
+
+def test_svg_safe_area_rejects_content_in_protected_margin(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="12mm" height="12mm" viewBox="0 0 12 12">
+<rect width="12" height="12" fill="white"/><rect x="0" y="4" width="2" height="4" fill="black"/>
+</svg>""",
+        encoding="utf-8",
+    )
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert not report.passed
+    assert "SAFE_AREA_VIOLATION" in [issue.code for issue in report.issues]
+
+
+def test_pdf_safe_area_rejects_content_in_protected_margin(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=12 / (25.4 / 72), height=12 / (25.4 / 72))
+    page.draw_rect(page.rect, color=None, fill=(1, 1, 1))
+    page.draw_rect(pymupdf.Rect(5, 20, 30, 35), color=None, fill=(0, 0, 0))
+    document.save(artwork)
+    document.close()
+
+    report = validate(_safe_area_spec(artwork))
+
+    assert not report.passed
+    assert "SAFE_AREA_VIOLATION" in [issue.code for issue in report.issues]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -59,7 +128,43 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork checksum mismatch: passing-label.svg",
+        "artwork byte count mismatch: passing-label.svg",
+    ]
+
+
+def test_package_rejects_manifest_path_traversal_and_unexpected_files(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (manifest_path.parent / "notes.txt").write_text("unexpected", encoding="utf-8")
+
+    failures = verify_package(manifest_path.parent)
+
+    assert "artwork file path is unsafe" in failures
+    assert "unexpected package files: notes.txt, passing-label.svg" in failures
+
+
+def test_package_rejects_windows_separator_manifest_path(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = r"..\outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "artwork file path is unsafe" in verify_package(manifest_path.parent)
+
+
+def test_package_rejects_manifest_byte_count_tampering(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["bytes"] -= 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == [
+        "validation_report byte count mismatch: validation-report.json"
+    ]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
