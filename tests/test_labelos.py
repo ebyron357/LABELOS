@@ -10,7 +10,7 @@ from barcode.writer import ImageWriter
 
 from labelos.cli import main
 from labelos.models import LabelSpec
-from labelos.package import create_package, verify_package
+from labelos.package import _sha256, create_package, verify_package
 from labelos.validate import validate
 
 ROOT = Path(__file__).parent.parent
@@ -52,14 +52,65 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_malformed_pdf_fails_without_crashing(tmp_path):
+    artwork = tmp_path / "corrupt.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["schema_version"] == 2
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_unexpected_files(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    (manifest.parent / "untracked.txt").write_text("tampered", encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["unexpected package files: untracked.txt"]
+
+
+def test_package_verification_rejects_unsafe_manifest_path(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == [
+        "artwork file path is unsafe",
+        "unexpected package files: passing-label.svg",
+    ]
+
+
+def test_package_verification_requires_passing_report_and_matching_spec(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"]["sha256"] = _sha256(report_path)
+    data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report does not record a passing validation"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
