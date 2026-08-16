@@ -30,19 +30,25 @@ The configuration is JSON:
 }
 ```
 
-Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
-and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
-`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. When
+`safe_area_mm` is set, LABELOS renders SVG and PDF artwork at 300 DPI (or inspects PNG pixels)
+and rejects non-background content between the asset edge and `bleed_mm + safe_area_mm`.
+Uniform full-bleed backgrounds are allowed. Artwork with a non-uniform edge that cannot be
+inspected reliably fails validation rather than skipping the check. SVG, PNG, and PDF artwork
+are accepted. PDF inspection and QR/barcode decoding are installed with LABELOS; SVG and PDF
+are rendered at 300 DPI before code decoding. If `barcode_value` or `qr_value` is configured
+but the decoder cannot load, validation fails rather than asserting a code was checked.
 
 ## Commands
 
-- `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+- `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution, safe
+  area, required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+  report, and a schema-versioned SHA-256 manifest. Existing package destinations are never
+  overwritten.
+- `labelos verify-package DESTINATION`: verifies manifest schema, safe regular-file paths,
+  checksums, byte counts, a passing validation report with matching specification metadata,
+  and that the release directory contains no unexpected files.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
