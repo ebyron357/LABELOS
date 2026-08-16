@@ -135,6 +135,17 @@ def test_package_rejects_manifest_path_traversal_and_unexpected_files(tmp_path):
     assert "unexpected package files: notes.txt, passing-label.svg" in failures
 
 
+def test_package_rejects_dot_segments_and_path_separators(tmp_path):
+    for index, name in enumerate((".", "..", "nested/file.svg", r"nested\file.svg")):
+        destination = tmp_path / f"release-{index}"
+        manifest_path = create_package(passing_spec(), validate(passing_spec()), destination)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["artwork"]["file"] = name
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        assert "artwork file path is unsafe" in verify_package(manifest_path.parent)
+
+
 def test_package_rejects_manifest_byte_count_tampering(tmp_path):
     manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
