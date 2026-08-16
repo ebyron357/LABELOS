@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -59,7 +60,24 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork byte-size mismatch: passing-label.svg" in failures
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+
+
+def test_package_verification_rejects_unsupported_schema_and_unexpected_files(tmp_path):
+    spec = passing_spec()
+    package = tmp_path / "release"
+    manifest = create_package(spec, validate(spec), package)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(package) == ["manifest.json has an unsupported schema version"]
+
+    create_package(spec, validate(spec), tmp_path / "second-release")
+    second_package = tmp_path / "second-release"
+    (second_package / "unexpected.txt").write_text("not in manifest", encoding="utf-8")
+    assert verify_package(second_package) == ["unexpected package file: unexpected.txt"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -165,3 +183,96 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_safe_area_passes_when_content_is_inside_safe_boundary(tmp_path):
+    artwork = tmp_path / "safe.png"
+    image = Image.new("RGBA", (424, 224), "white")
+    ImageDraw.Draw(image).rectangle((80, 80, 160, 140), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_safe_area_rejects_content_inside_protected_boundary(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGBA", (424, 224), "white")
+    ImageDraw.Draw(image).rectangle((10, 80, 80, 140), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
+def test_safe_area_fails_closed_for_transparent_png(tmp_path):
+    artwork = tmp_path / "transparent.png"
+    Image.new("RGBA", (424, 224), (255, 255, 255, 0)).save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "SAFE_AREA_UNCHECKABLE" for issue in validate(spec).issues)
+
+
+def test_safe_area_is_checked_for_svg_and_pdf_artwork(tmp_path):
+    svg = tmp_path / "safe.svg"
+    svg.write_text(
+        """<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+        <rect width="106" height="56" fill="white"/>
+        <rect x="10" y="10" width="20" height="20" fill="black"/>
+        </svg>""",
+        encoding="utf-8",
+    )
+    pdf = tmp_path / "safe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(page.rect, color=None, fill=(1, 1, 1))
+    page.draw_rect(pymupdf.Rect(40, 40, 100, 100), color=None, fill=(0, 0, 0))
+    document.save(pdf)
+    document.close()
+
+    for artwork in (svg, pdf):
+        spec = LabelSpec.from_dict(
+            {
+                "artwork": artwork.name,
+                "width_mm": 100,
+                "height_mm": 50,
+                "bleed_mm": 3,
+                "safe_area_mm": 2,
+            },
+            tmp_path,
+        )
+        report = validate(spec)
+        assert report.passed, report.to_dict()
+        assert "safe-area" in report.checks

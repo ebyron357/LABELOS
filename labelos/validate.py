@@ -7,10 +7,13 @@ import struct
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+SAFE_AREA_DPI = 300
+BACKGROUND_TOLERANCE = 8
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -32,6 +35,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -118,7 +122,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -200,3 +208,104 @@ def _code_image(artwork: Path, image_module):
         return image
     finally:
         document.close()
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject artwork content inside the required bleed and safe-area boundary."""
+    if spec.safe_area_mm <= 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        image = _safe_area_image(spec.artwork)
+        width_px, height_px = image.size
+        protected_mm = spec.bleed_mm + spec.safe_area_mm
+        protected_x_px = round(protected_mm / (spec.width_mm + 2 * spec.bleed_mm) * width_px)
+        protected_y_px = round(protected_mm / (spec.height_mm + 2 * spec.bleed_mm) * height_px)
+        if (
+            protected_x_px <= 0
+            or protected_y_px <= 0
+            or protected_x_px * 2 >= width_px
+            or protected_y_px * 2 >= height_px
+        ):
+            report.add("SAFE_AREA_UNCHECKABLE", "error", "Safe area leaves no inspectable artwork area")
+            return
+        background = _edge_background(image)
+        if background is None:
+            report.add(
+                "SAFE_AREA_UNCHECKABLE",
+                "error",
+                "Artwork edge is transparent or has no uniform bleed background",
+            )
+            return
+        if _has_content_in_protected_area(image, protected_x_px, protected_y_px, background):
+            report.add(
+                "SAFE_AREA_VIOLATION",
+                "error",
+                f"Non-background content was found within {protected_mm:.2f} mm of an artwork edge",
+            )
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+
+
+def _safe_area_image(artwork: Path):
+    """Render source artwork to an RGBA Pillow image at a fixed inspection resolution."""
+    from PIL import Image
+
+    if artwork.suffix.lower() == ".png":
+        with Image.open(artwork) as source:
+            return source.convert("RGBA").copy()
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError("Artwork must contain exactly one page")
+        # PDF and SVG pages have a white print substrate when rasterized for inspection.
+        # Preserve PNG alpha separately so transparent raster artwork still fails closed.
+        pixmap = document[0].get_pixmap(dpi=SAFE_AREA_DPI, alpha=False)
+        with Image.open(BytesIO(pixmap.tobytes("png"))) as source:
+            return source.convert("RGBA").copy()
+    finally:
+        document.close()
+
+
+def _edge_background(image: Any) -> tuple[int, int, int] | None:
+    """Return a uniform opaque edge color, otherwise fail closed."""
+    width, height = image.size
+    pixels = image.load()
+    samples = [
+        pixels[x, y]
+        for x in range(width)
+        for y in (0, height - 1)
+    ] + [
+        pixels[x, y]
+        for x in (0, width - 1)
+        for y in range(1, height - 1)
+    ]
+    if not samples or any(pixel[3] != 255 for pixel in samples):
+        return None
+    channels = tuple([pixel[index] for pixel in samples] for index in range(3))
+    if any(max(channel) - min(channel) > BACKGROUND_TOLERANCE for channel in channels):
+        return None
+    return tuple(round(sum(channel) / len(channel)) for channel in channels)
+
+
+def _has_content_in_protected_area(
+    image: Any, protected_x_px: int, protected_y_px: int, background: tuple[int, int, int]
+) -> bool:
+    """Detect pixels that differ from the uniform bleed background in the protected frame."""
+    width, height = image.size
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            if (
+                protected_x_px <= x < width - protected_x_px
+                and protected_y_px <= y < height - protected_y_px
+            ):
+                continue
+            pixel = pixels[x, y]
+            if pixel[3] != 255 or any(
+                abs(pixel[channel] - background[channel]) > BACKGROUND_TOLERANCE for channel in range(3)
+            ):
+                return True
+    return False
