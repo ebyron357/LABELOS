@@ -32,7 +32,7 @@
 ## Verification record
 
 Verified on 2026-08-16 for release-verification commit
-`efa754419d71557b501095c8dc4620823b9b6b1f`:
+`efa75449687f30f84311bf8fd59471976f113714`:
 
 ```text
 python3 -m pytest -q                      # 13 passed
