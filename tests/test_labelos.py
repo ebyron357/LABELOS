@@ -1,5 +1,7 @@
 import json
+import os
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -59,7 +61,59 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+
+
+def test_package_verification_rejects_legacy_and_unsafe_manifests(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+
+    contents["schema_version"] = 1
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+    assert verify_package(manifest.parent) == ["manifest schema_version must be 2"]
+
+    contents["schema_version"] = 2
+    contents["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+    assert "manifest artwork file path is unsafe" in verify_package(manifest.parent)
+
+
+def test_package_verification_rejects_extra_files_symlinks_and_failed_reports(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    (manifest.parent / "unexpected.txt").write_text("not part of the release", encoding="utf-8")
+    assert "package contains unexpected file: unexpected.txt" in verify_package(manifest.parent)
+    (manifest.parent / "unexpected.txt").unlink()
+
+    os.symlink(manifest.parent / "passing-label.svg", manifest.parent / "artwork-link.svg")
+    assert "package contains non-regular file: artwork-link.svg" in verify_package(manifest.parent)
+    (manifest.parent / "artwork-link.svg").unlink()
+
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    contents["validation_report"]["bytes"] = report_path.stat().st_size
+    contents["validation_report"]["sha256"] = sha256(report_path.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report does not pass"]
+
+
+def test_package_verification_handles_malformed_report_shape(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["metadata"] = []
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    contents["validation_report"]["bytes"] = report_path.stat().st_size
+    contents["validation_report"]["sha256"] = sha256(report_path.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report spec does not match manifest"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
