@@ -299,10 +299,56 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     document.save(artwork)
     document.close()
     spec = LabelSpec.from_dict(
-        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "barcode_value": value}, tmp_path
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 100,
+            "min_dpi": 1,
+            "barcode_value": value,
+        },
+        tmp_path,
     )
 
     report = validate(spec)
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_pdf_embedded_image_dpi_is_enforced(tmp_path):
+    image_path = tmp_path / "source.png"
+    Image.new("RGB", (72, 72), "black").save(image_path)
+    artwork = tmp_path / "low-resolution.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=72, height=72)
+    page.insert_image(pymupdf.Rect(0, 0, 72, 72), filename=image_path)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.metadata["pdf"]["embedded_image_dpi"] == [72.0]
+    assert any(issue.code == "PDF_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_pdf_embedded_image_dpi_accepts_high_resolution_artwork(tmp_path):
+    image_path = tmp_path / "source.png"
+    Image.new("RGB", (600, 600), "black").save(image_path)
+    artwork = tmp_path / "high-resolution.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=72, height=72)
+    page.insert_image(pymupdf.Rect(0, 0, 72, 72), filename=image_path)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["pdf"]["embedded_image_dpi"] == [600.0]
