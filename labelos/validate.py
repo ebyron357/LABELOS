@@ -30,6 +30,7 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    _validate_safe_area(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     report.metadata["spec"] = {
@@ -144,6 +145,90 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject artwork whose trim-to-safe-area margin contains non-background pixels."""
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        with _safe_area_image(spec.artwork, Image) as image:
+            rgba = image.convert("RGBA")
+            width_px, height_px = rgba.size
+            safe_left = round((spec.bleed_mm + spec.safe_area_mm) * width_px / (spec.width_mm + 2 * spec.bleed_mm))
+            safe_top = round((spec.bleed_mm + spec.safe_area_mm) * height_px / (spec.height_mm + 2 * spec.bleed_mm))
+            trim_left = round(spec.bleed_mm * width_px / (spec.width_mm + 2 * spec.bleed_mm))
+            trim_top = round(spec.bleed_mm * height_px / (spec.height_mm + 2 * spec.bleed_mm))
+            background = _corner_background(rgba)
+            if background is None:
+                report.add(
+                    "SAFE_AREA_UNCHECKABLE",
+                    "error",
+                    "Artwork has transparency or inconsistent corner background colors",
+                )
+                return
+            margin_pixels = (
+                list(rgba.crop((trim_left, trim_top, safe_left, height_px - trim_top)).get_flattened_data())
+                + list(
+                    rgba.crop(
+                        (width_px - safe_left, trim_top, width_px - trim_left, height_px - trim_top)
+                    ).get_flattened_data()
+                )
+                + list(rgba.crop((safe_left, trim_top, width_px - safe_left, safe_top)).get_flattened_data())
+                + list(
+                    rgba.crop(
+                        (safe_left, height_px - safe_top, width_px - safe_left, height_px - trim_top)
+                    ).get_flattened_data()
+                )
+            )
+            if any(_color_distance(pixel, background) > 12 for pixel in margin_pixels):
+                report.add(
+                    "SAFE_AREA_VIOLATION",
+                    "error",
+                    "Non-background artwork appears between trim and the configured safe area",
+                )
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKABLE", "error", f"Could not inspect safe area: {error}")
+
+
+def _safe_area_image(artwork: Path, image_module):
+    if artwork.suffix.lower() == ".png":
+        return image_module.open(artwork)
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError("Artwork must contain exactly one page")
+        # Rendering vector artwork onto an opaque canvas avoids false transparent
+        # edge pixels introduced by the SVG/PDF renderer itself.
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
+
+
+def _corner_background(image) -> tuple[int, int, int, int] | None:
+    corners = (
+        image.getpixel((0, 0)),
+        image.getpixel((image.width - 1, 0)),
+        image.getpixel((0, image.height - 1)),
+        image.getpixel((image.width - 1, image.height - 1)),
+    )
+    if any(pixel[3] != 255 for pixel in corners) or max(
+        _color_distance(pixel, corners[0]) for pixel in corners
+    ) > 12:
+        return None
+    return corners[0]
+
+
+def _color_distance(left: tuple[int, int, int, int], right: tuple[int, int, int, int]) -> int:
+    return max(abs(a - b) for a, b in zip(left, right))
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:

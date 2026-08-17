@@ -52,6 +52,32 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_safe_area_is_enforced_for_vector_artwork():
+    passing = LabelSpec.from_dict(
+        {
+            "artwork": "fixtures/passing-label.svg",
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        ROOT,
+    )
+    failing = LabelSpec.from_dict(
+        {
+            "artwork": "fixtures/unsafe-safe-area.svg",
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        ROOT,
+    )
+
+    assert validate(passing).passed
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(failing).issues)
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
