@@ -32,6 +32,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -180,6 +181,108 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
     for kind, expected in expectations:
         if expected and expected not in decoded:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject non-background artwork outside the configured trim-safe rectangle."""
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+    except ImportError:
+        report.add("SAFE_AREA_READER_UNAVAILABLE", "error", "Install Pillow to validate the safe area")
+        return
+    try:
+        with _safe_area_image(spec.artwork, Image) as image:
+            if _has_transparency(image):
+                report.add(
+                    "SAFE_AREA_TRANSPARENT",
+                    "error",
+                    "Artwork has transparency; a safe-area background cannot be determined",
+                )
+                return
+            image = image.convert("RGB")
+            background = _corner_background(image)
+            if background is None:
+                report.add(
+                    "SAFE_AREA_BACKGROUND_AMBIGUOUS",
+                    "error",
+                    "Artwork corners disagree; a safe-area background cannot be determined",
+                )
+                return
+            safe_left = round(
+                (spec.bleed_mm + spec.safe_area_mm) / (spec.width_mm + 2 * spec.bleed_mm)
+                * image.width
+            )
+            safe_top = round(
+                (spec.bleed_mm + spec.safe_area_mm) / (spec.height_mm + 2 * spec.bleed_mm)
+                * image.height
+            )
+            if safe_left * 2 >= image.width or safe_top * 2 >= image.height:
+                report.add("SAFE_AREA_INVALID", "error", "Safe area leaves no rasterized printable area")
+                return
+            outside = (
+                image.crop((0, 0, safe_left, image.height)),
+                image.crop((image.width - safe_left, 0, image.width, image.height)),
+                image.crop((safe_left, 0, image.width - safe_left, safe_top)),
+                image.crop((safe_left, image.height - safe_top, image.width - safe_left, image.height)),
+            )
+            if any(_contains_non_background(region, background) for region in outside):
+                report.add(
+                    "SAFE_AREA_VIOLATION",
+                    "error",
+                    "Non-background artwork extends outside the configured safe area",
+                )
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_RENDER_FAILED", "error", f"Could not inspect safe area: {error}")
+
+
+def _safe_area_image(artwork: Path, image_module):
+    if artwork.suffix.lower() == ".png":
+        image = image_module.open(artwork)
+        image.load()
+        return image
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count < 1:
+            raise ValueError("Artwork contains no pages to inspect")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        image = image_module.open(BytesIO(pixmap.tobytes("png")))
+        image.load()
+        return image
+    finally:
+        document.close()
+
+
+def _has_transparency(image) -> bool:
+    if "A" not in image.getbands():
+        return False
+    alpha = image.getchannel("A")
+    return alpha.getextrema()[0] < 255
+
+
+def _corner_background(image) -> tuple[int, int, int] | None:
+    corners = (
+        image.getpixel((0, 0)),
+        image.getpixel((image.width - 1, 0)),
+        image.getpixel((0, image.height - 1)),
+        image.getpixel((image.width - 1, image.height - 1)),
+    )
+    background = corners[0]
+    if any(_pixel_distance(pixel, background) > 8 for pixel in corners[1:]):
+        return None
+    return background
+
+
+def _contains_non_background(image, background: tuple[int, int, int]) -> bool:
+    return any(_pixel_distance(pixel, background) > 8 for pixel in image.get_flattened_data())
+
+
+def _pixel_distance(first: tuple[int, int, int], second: tuple[int, int, int]) -> int:
+    return max(abs(component - reference) for component, reference in zip(first, second))
 
 
 def _code_image(artwork: Path, image_module):
