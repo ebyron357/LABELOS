@@ -39,7 +39,9 @@ code was checked.
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  extractable SVG/PDF text against the configured safe area, required copy, and configured
+  barcode/QR values. The safe area starts after the bleed plus `safe_area_mm`; unsupported
+  SVG text geometry fails closed when a safe area is configured.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies package checksums.

@@ -26,3 +26,7 @@ jobs:
       - run: python -m pytest
       - run: python -m ruff check .
       - run: python -m build
+      - run: python -m labelos.cli validate examples/label.json --json
+      - run: python -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
+      - run: python -m labelos.cli verify-package /tmp/labelos-e2e --json
+      - run: python -m labelos.cli doctor --json

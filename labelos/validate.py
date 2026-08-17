@@ -101,6 +101,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
     else:
         _validate_physical_size(spec, width, height, report)
+    _validate_vector_safe_area(spec, report)
     return text
 
 
@@ -128,6 +129,7 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         text = page.get_text()
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
+        _validate_text_safe_area(spec, page, report)
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
         return text
@@ -144,6 +146,66 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_vector_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Inspect SVG text geometry through PyMuPDF's SVG renderer."""
+
+    if spec.safe_area_mm <= 0:
+        return
+    try:
+        import pymupdf
+    except ImportError:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", "Install PyMuPDF to inspect SVG safe-area text")
+        return
+    try:
+        document = pymupdf.open(spec.artwork)
+        if document.page_count != 1:
+            report.add(
+                "SAFE_AREA_UNVERIFIABLE",
+                "error",
+                f"SVG safe-area inspection requires one page, found {document.page_count}",
+            )
+            return
+        _validate_text_safe_area(spec, document[0], report)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", f"Could not inspect SVG text geometry: {error}")
+    finally:
+        if "document" in locals():
+            document.close()
+
+
+def _validate_text_safe_area(spec: LabelSpec, page, report: Report) -> None:
+    """Ensure extractable text stays within trim plus configured safe-area inset."""
+
+    if spec.safe_area_mm <= 0:
+        return
+    inset = (spec.bleed_mm + spec.safe_area_mm) / MM_PER_POINT
+    safe_rect = page.rect + (inset, inset, -inset, -inset)
+    report.checks.append("safe-area:text")
+    report.metadata["safe_area_bounds_mm"] = {
+        "left": round(spec.bleed_mm + spec.safe_area_mm, 3),
+        "top": round(spec.bleed_mm + spec.safe_area_mm, 3),
+        "right": round(spec.width_mm + spec.bleed_mm - spec.safe_area_mm, 3),
+        "bottom": round(spec.height_mm + spec.bleed_mm - spec.safe_area_mm, 3),
+    }
+    if safe_rect.is_empty or safe_rect.is_infinite:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", "Configured safe area has no inspectable bounds")
+        return
+    try:
+        blocks = page.get_text("blocks")
+    except (RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", f"Could not inspect text geometry: {error}")
+        return
+    for x0, y0, x1, y1, value, *_ in blocks:
+        if not value.strip():
+            continue
+        if x0 < safe_rect.x0 or y0 < safe_rect.y0 or x1 > safe_rect.x1 or y1 > safe_rect.y1:
+            report.add(
+                "SAFE_AREA_VIOLATION",
+                "error",
+                f"Text {value.strip()!r} extends outside the configured safe area",
+            )
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
