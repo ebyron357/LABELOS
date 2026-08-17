@@ -32,7 +32,7 @@
 ## Verification record
 
 Verified on 2026-08-17 from implementation commit
-`6b3b8c176db8fb75e6f1c72a32a4f9a08b4dd419` (`fix: fail closed on malformed PDF artwork`):
+`6b3b8c1a30eea3a2078be4e606846cdb27014d72` (`fix: fail closed on malformed PDF artwork`):
 
 ```text
 python3 -m pytest -q                      # 11 passed
@@ -41,8 +41,8 @@ python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-final --json
+python3 -m labelos.cli verify-package /tmp/labelos-e2e-final --json
 python3 -m labelos.cli doctor --json
 python3 -m labelos.cli validate /tmp/labelos-malformed-pdf/label.json --json  # exits 1
 ```
