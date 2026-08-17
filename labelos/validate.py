@@ -101,6 +101,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
     else:
         _validate_physical_size(spec, width, height, report)
+    _validate_safe_area_text(spec, report)
     return text
 
 
@@ -126,6 +127,7 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         page = document[0]
         _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
         text = page.get_text()
+        _validate_safe_area_text(spec, report, page)
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
         if not page.get_fonts():
@@ -133,6 +135,62 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         return text
     finally:
         document.close()
+
+
+def _validate_safe_area_text(spec: LabelSpec, report: Report, page=None) -> None:
+    """Reject extractable text extending outside the bleed + safe-area inset.
+
+    PyMuPDF exposes SVG and PDF text bounding boxes in points.  Opening an SVG again is
+    intentional: the source parser only establishes physical dimensions, while PyMuPDF
+    resolves its viewBox, transforms, and text positioning into a common coordinate system.
+    """
+
+    if spec.safe_area_mm == 0:
+        return
+    close_page = page is None
+    document = None
+    try:
+        if close_page:
+            import pymupdf
+
+            document = pymupdf.open(spec.artwork)
+            if document.page_count != 1:
+                return
+            page = document[0]
+        assert page is not None
+        inset = (spec.bleed_mm + spec.safe_area_mm) / MM_PER_POINT
+        safe_rect = (inset, inset, page.rect.width - inset, page.rect.height - inset)
+        if safe_rect[0] >= safe_rect[2] or safe_rect[1] >= safe_rect[3]:
+            report.add("SAFE_AREA_UNVERIFIABLE", "error", "Safe-area inset leaves no artwork area")
+            return
+        report.checks.append("safe-area-text")
+        report.metadata["safe_area_bounds_mm"] = {
+            "left": round(spec.bleed_mm + spec.safe_area_mm, 3),
+            "top": round(spec.bleed_mm + spec.safe_area_mm, 3),
+            "right": round(page.rect.width * MM_PER_POINT - spec.bleed_mm - spec.safe_area_mm, 3),
+            "bottom": round(page.rect.height * MM_PER_POINT - spec.bleed_mm - spec.safe_area_mm, 3),
+        }
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    if not span.get("text", "").strip():
+                        continue
+                    x0, y0, x1, y1 = span["bbox"]
+                    if x0 < safe_rect[0] or y0 < safe_rect[1] or x1 > safe_rect[2] or y1 > safe_rect[3]:
+                        report.add(
+                            "SAFE_AREA_VIOLATION",
+                            "error",
+                            "Text extends outside the required safe area",
+                            str(spec.artwork),
+                        )
+                        return
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", f"Could not inspect text geometry: {error}")
+    finally:
+        if document is not None:
+            document.close()
 
 
 def _validate_physical_size(spec: LabelSpec, width: float, height: float, report: Report) -> None:

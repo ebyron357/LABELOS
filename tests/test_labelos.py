@@ -52,6 +52,57 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_svg_text_outside_safe_area_fails(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" '
+            'viewBox="0 0 106 56"><text x="3" y="20" font-size="4">Critical copy</text></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert "safe-area-text" in report.checks
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_pdf_text_inside_safe_area_passes(tmp_path):
+    artwork = tmp_path / "safe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.insert_text((20 / (25.4 / 72), 20 / (25.4 / 72)), "Critical copy", fontsize=12)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area-text" in report.checks
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
