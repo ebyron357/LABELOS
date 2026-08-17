@@ -44,11 +44,11 @@ Verified on 2026-08-17 from commits `6d8405b` (PDF effective-DPI enforcement), `
 (extractable-text safe areas), and `0cedd6f` (package-integrity verification):
 
 ```text
-python3 -m pytest -q                      # 17 passed
+python3 -m pytest -q                      # 18 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-build-package-integrity-6qDCJb
+python3 -m build --outdir /tmp/labelos-build-pdf-placement-MoL2R8
                                          # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
 python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-safe-area-983i12/release --json
@@ -60,15 +60,16 @@ PYTHONPATH=/tmp/labelos-wheel-safe-area-IugGQF python3 -m labelos.cli validate \
   examples/label.json --json
 ```
 
-Results: 17 tests passed; Ruff, bytecode compilation, and dependency consistency checks
+Results: 18 tests passed; Ruff, bytecode compilation, and dependency consistency checks
 passed; the sdist and wheel were created in `/tmp/labelos-build-package-integrity-6qDCJb`;
 source CLI packaging was created and checksum-verified in
-`/tmp/labelos-package-final-e2e-Qa74WA/release`; the isolated wheel validated the example
+`/tmp/labelos-pdf-placement-e2e-gdPKvm/release`; the isolated wheel validated the example
 configuration.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. PDF raster-image DPI regression coverage includes both a rejected
-72-DPI image and an accepted 600-DPI image; safe-area coverage includes accepted SVG text plus
-rejected SVG and PDF text. Package-verification regressions reject extra files, package and
-artifact symlinks, incorrect byte counts, checksum mismatches, and a validation-report/manifest
-mismatch. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+72-DPI image and an accepted 600-DPI image, and verifies each placement of a reused PDF image
+exactly once; safe-area coverage includes accepted SVG text plus rejected SVG and PDF text.
+Package-verification regressions reject extra files, package and artifact symlinks, incorrect
+byte counts, checksum mismatches, and a validation-report/manifest mismatch. GitHub Actions runs
+tests, lint, and builds on Python 3.10 and 3.12.

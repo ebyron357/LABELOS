@@ -151,8 +151,12 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
 def _validate_pdf_image_resolution(document, page, spec: LabelSpec, report: Report) -> None:
     """Check the effective resolution of every raster image placed on a PDF page."""
     resolutions = []
+    inspected_xrefs = set()
     for image in page.get_images(full=True):
         xref = image[0]
+        if xref in inspected_xrefs:
+            continue
+        inspected_xrefs.add(xref)
         try:
             pixmap = document.extract_image(xref)
             width, height = pixmap["width"], pixmap["height"]

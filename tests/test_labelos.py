@@ -339,3 +339,23 @@ def test_pdf_embedded_image_dpi_accepts_high_resolution_artwork(tmp_path):
 
     assert report.passed
     assert report.metadata["pdf"]["embedded_image_dpi"] == [600.0]
+
+
+def test_pdf_image_dpi_reports_each_reused_image_placement_once(tmp_path):
+    image_path = tmp_path / "source.png"
+    Image.new("RGB", (72, 72), "black").save(image_path)
+    artwork = tmp_path / "reused-image.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=144, height=72)
+    for rectangle in (pymupdf.Rect(0, 0, 72, 72), pymupdf.Rect(72, 0, 144, 72)):
+        page.insert_image(rectangle, filename=image_path)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 50.8, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.metadata["pdf"]["embedded_image_dpi"] == [72.0, 72.0]
+    assert [issue.code for issue in report.issues].count("PDF_IMAGE_DPI_TOO_LOW") == 2
