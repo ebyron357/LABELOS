@@ -11,6 +11,7 @@ from pathlib import Path
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+POINTS_PER_INCH = 72
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -128,11 +129,64 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         text = page.get_text()
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
+        _validate_pdf_raster_images(document, page, spec, report)
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
         return text
     finally:
         document.close()
+
+
+def _validate_pdf_raster_images(document, page, spec: LabelSpec, report: Report) -> None:
+    """Check the effective DPI of every displayed raster image on a PDF page."""
+    images = []
+    seen: set[tuple[int, float, float, float, float]] = set()
+    try:
+        image_refs = page.get_images(full=True)
+        for image_ref in image_refs:
+            xref = image_ref[0]
+            image = document.extract_image(xref)
+            width_px, height_px = image["width"], image["height"]
+            for rect in page.get_image_rects(xref):
+                placement = (xref, rect.x0, rect.y0, rect.x1, rect.y1)
+                if placement in seen:
+                    continue
+                seen.add(placement)
+                if rect.width <= 0 or rect.height <= 0:
+                    report.add(
+                        "PDF_IMAGE_PLACEMENT_INVALID",
+                        "error",
+                        f"Raster image xref {xref} has a non-positive display size",
+                    )
+                    continue
+                horizontal_dpi = width_px * POINTS_PER_INCH / rect.width
+                vertical_dpi = height_px * POINTS_PER_INCH / rect.height
+                effective_dpi = min(horizontal_dpi, vertical_dpi)
+                images.append(
+                    {
+                        "xref": xref,
+                        "pixels": {"width": width_px, "height": height_px},
+                        "placement_points": {
+                            "width": round(rect.width, 3),
+                            "height": round(rect.height, 3),
+                        },
+                        "dpi": round(effective_dpi, 2),
+                    }
+                )
+                if effective_dpi < spec.min_dpi:
+                    report.add(
+                        "PDF_IMAGE_DPI_TOO_LOW",
+                        "error",
+                        (
+                            f"Raster image xref {xref} has effective resolution "
+                            f"{effective_dpi:.1f} DPI, below {spec.min_dpi} DPI"
+                        ),
+                    )
+    except (RuntimeError, ValueError, KeyError, TypeError) as error:
+        report.add("PDF_IMAGE_INSPECTION_FAILED", "error", f"Could not inspect PDF raster images: {error}")
+        return
+    report.checks.append("pdf-raster-resolution")
+    report.metadata["pdf"]["raster_images"] = images
 
 
 def _validate_physical_size(spec: LabelSpec, width: float, height: float, report: Report) -> None:

@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -158,10 +159,58 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     document.save(artwork)
     document.close()
     spec = LabelSpec.from_dict(
-        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "barcode_value": value}, tmp_path
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 100,
+            "min_dpi": 1,
+            "barcode_value": value,
+        },
+        tmp_path,
     )
 
     report = validate(spec)
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def _pdf_with_image(tmp_path, image_size: tuple[int, int], placement: pymupdf.Rect) -> Path:
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", image_size, "white").save(image_path)
+    artwork = tmp_path / "artwork.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=100 / (25.4 / 72), height=100 / (25.4 / 72))
+    page.insert_image(placement, filename=image_path)
+    document.save(artwork)
+    document.close()
+    return artwork
+
+
+def test_pdf_embedded_raster_effective_dpi_passes(tmp_path):
+    page_size = 100 / (25.4 / 72)
+    artwork = _pdf_with_image(tmp_path, (1200, 1200), pymupdf.Rect(0, 0, page_size, page_size))
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    image = report.metadata["pdf"]["raster_images"][0]
+    assert image["pixels"] == {"width": 1200, "height": 1200}
+    assert image["placement_points"] == {"width": round(page_size, 3), "height": round(page_size, 3)}
+    assert image["dpi"] == 304.8
+
+
+def test_pdf_embedded_raster_effective_dpi_fails(tmp_path):
+    artwork = _pdf_with_image(tmp_path, (100, 100), pymupdf.Rect(0, 0, 100, 100))
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "PDF_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+    assert report.metadata["pdf"]["raster_images"][0]["dpi"] == 72.0

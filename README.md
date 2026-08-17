@@ -31,15 +31,17 @@ The configuration is JSON:
 ```
 
 Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
-and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
-`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+and PDF artwork are accepted. PNG validation calculates effective artwork resolution; PDF
+validation calculates effective DPI for every displayed embedded raster, using its pixel
+dimensions and placed size. SVG and PDF are rendered at 300 DPI before code decoding. If
+`barcode_value` or `qr_value` is configured but the decoder cannot load, validation fails rather
+than asserting a code was checked.
 
 ## Commands
 
-- `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+- `labelos validate CONFIG [--json]`: validate format, dimensions, PNG/PDF raster resolution,
+  required copy, and configured barcode/QR values. PDF JSON reports include each inspected
+  raster image's pixels, placement size, and effective DPI.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies package checksums.
