@@ -36,13 +36,20 @@ LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_v
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
 code was checked.
 
+When `safe_area_mm` is set, LABELOS rasterizes SVG and PDF artwork at 300 DPI (and inspects
+PNG directly) and rejects non-background content outside the inset trim-safe rectangle. It
+fails closed when the corner background is ambiguous or a PNG has transparency, because the
+safe boundary cannot then be determined reliably.
+
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
   required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+  report, and a SHA-256/byte-count manifest. Existing package destinations are never
+  overwritten.
+- `labelos verify-package DESTINATION`: verifies the package schema, expected file set,
+  filenames, symlinks, checksums, byte counts, and report/spec consistency.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
