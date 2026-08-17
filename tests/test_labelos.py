@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -59,7 +60,35 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+
+
+def test_package_verification_rejects_unsafe_manifest_and_unexpected_files(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert "artwork filename is unsafe" in verify_package(manifest.parent)
+
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "extra-file-release")
+    (manifest.parent / "unapproved.txt").write_text("unexpected", encoding="utf-8")
+    assert verify_package(manifest.parent) == ["package contains unexpected files: unapproved.txt"]
+
+
+def test_package_verification_rejects_report_spec_mismatch(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["metadata"]["spec"]["width_mm"] = 999
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report spec does not match manifest"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

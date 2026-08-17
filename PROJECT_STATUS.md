@@ -10,7 +10,8 @@
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+  SHA-256 checksums, byte counts, and fail-closed schema-v2 verification. Verification rejects
+  unsafe paths, symlinks, unexpected files, malformed manifests, and inconsistent reports.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -29,10 +30,10 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-17 from the repository branch before its pending verified commit:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 11 passed
 python3 -m ruff check .                   # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
@@ -41,8 +42,12 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 11 tests passed; Ruff and compilation checks passed. A source distribution and
+wheel were built in `/tmp/labelos-production-build`; the installed-wheel CLI successfully
+validated, packaged, and verified a release. The package verifier rejects manifest path
+traversal, unexpected package files, byte-count changes, symlinks, and report/spec
+mismatches. The end-to-end package was created and checksum-verified at
+`/tmp/labelos-release-parent-ZothZc/release`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
