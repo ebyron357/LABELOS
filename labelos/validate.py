@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import struct
+from collections import Counter
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
@@ -32,6 +33,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -152,6 +154,93 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
     for value in spec.required_copy:
         if value not in text:
             report.add("REQUIRED_COPY_MISSING", "error", f"Required copy not found: {value!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Fail when non-background artwork enters the configured trim safety margin."""
+    if spec.safe_area_mm <= 0:
+        return
+    if any(issue.code in {"DIMENSIONS_MISMATCH", "SVG_DIMENSIONS_MISSING"} for issue in report.issues):
+        report.add(
+            "SAFE_AREA_UNCHECKED",
+            "error",
+            "Safe-area content cannot be checked until artwork dimensions are valid",
+        )
+        return
+    try:
+        from PIL import Image
+
+        image = _artwork_image(spec.artwork, Image)
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKED", "error", f"Could not inspect safe area: {error}")
+        return
+    try:
+        unsafe_pixels = _unsafe_content_pixels(spec, image)
+    finally:
+        image.close()
+    report.checks.append("safe-area-content")
+    report.metadata["safe_area"] = {
+        "margin_mm": spec.safe_area_mm,
+        "content_pixels": unsafe_pixels,
+    }
+    if unsafe_pixels:
+        report.add(
+            "SAFE_AREA_CONTENT",
+            "error",
+            f"{unsafe_pixels} non-background pixels enter the {spec.safe_area_mm:g} mm trim safety margin",
+        )
+
+
+def _artwork_image(artwork: Path, image_module):
+    """Return a fully loaded RGBA raster for content-placement inspection."""
+    if artwork.suffix.lower() == ".png":
+        with image_module.open(artwork) as source:
+            return source.convert("RGBA")
+    import pymupdf
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            raise ValueError(f"Expected one page to inspect safe area, found {document.page_count}")
+        pixmap = document[0].get_pixmap(dpi=300, alpha=False)
+        with image_module.open(BytesIO(pixmap.tobytes("png"))) as source:
+            return source.convert("RGBA")
+    finally:
+        document.close()
+
+
+def _unsafe_content_pixels(spec: LabelSpec, image) -> int:
+    """Count non-background pixels within the trim's configured safety margin."""
+    width_px, height_px = image.size
+    total_width = spec.width_mm + 2 * spec.bleed_mm
+    total_height = spec.height_mm + 2 * spec.bleed_mm
+    left = round(width_px * spec.bleed_mm / total_width)
+    right = width_px - left
+    top = round(height_px * spec.bleed_mm / total_height)
+    bottom = height_px - top
+    safe_x = round(width_px * spec.safe_area_mm / total_width)
+    safe_y = round(height_px * spec.safe_area_mm / total_height)
+    background = _dominant_color(image)
+    pixels = image.load()
+    count = 0
+    for y in range(top, bottom):
+        for x in range(left, right):
+            in_safe_margin = x < left + safe_x or x >= right - safe_x or y < top + safe_y or y >= bottom - safe_y
+            if in_safe_margin and _is_content(pixels[x, y], background):
+                count += 1
+    return count
+
+
+def _dominant_color(image) -> tuple[int, int, int, int]:
+    """Estimate the artwork background from quantized pixels across the canvas."""
+    histogram: Counter[tuple[int, int, int, int]] = Counter()
+    for pixel in image.get_flattened_data():
+        histogram[tuple(channel // 16 for channel in pixel)] += 1
+    return histogram.most_common(1)[0][0]
+
+
+def _is_content(pixel: tuple[int, int, int, int], background: tuple[int, int, int, int]) -> bool:
+    return any(abs(channel // 16 - expected) > 1 for channel, expected in zip(pixel, background))
 
 
 def _validate_codes(spec: LabelSpec, report: Report) -> None:
