@@ -128,11 +128,44 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         text = page.get_text()
         report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
+        _validate_pdf_image_resolution(spec, document, page, report)
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
         return text
     finally:
         document.close()
+
+
+def _validate_pdf_image_resolution(spec: LabelSpec, document, page, report: Report) -> None:
+    """Validate the effective DPI of raster images placed on the PDF page."""
+
+    images = []
+    for image in page.get_images(full=True):
+        xref = image[0]
+        try:
+            extracted = document.extract_image(xref)
+            width, height = int(extracted["width"]), int(extracted["height"])
+            placements = page.get_image_rects(xref)
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            report.add("PDF_IMAGE_UNREADABLE", "error", f"Could not inspect PDF image resource {xref}")
+            continue
+        for placement in placements:
+            width_inches = placement.width / 72
+            height_inches = placement.height / 72
+            if width_inches <= 0 or height_inches <= 0:
+                continue
+            dpi = min(width / width_inches, height / height_inches)
+            images.append({"xref": xref, "dpi": round(dpi, 2)})
+            if dpi < spec.min_dpi:
+                report.add(
+                    "PDF_IMAGE_DPI_TOO_LOW",
+                    "error",
+                    f"PDF image resource {xref} has effective resolution {dpi:.1f} DPI; "
+                    f"expected at least {spec.min_dpi} DPI",
+                )
+    if images:
+        report.checks.append("pdf-image-resolution")
+        report.metadata["pdf"]["images"] = images
 
 
 def _validate_physical_size(spec: LabelSpec, width: float, height: float, report: Report) -> None:

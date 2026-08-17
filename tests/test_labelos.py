@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -57,9 +58,42 @@ def test_package_contains_verified_manifest(tmp_path):
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["schema_version"] == 2
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_rejects_untracked_and_malformed_manifest_entries(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    (package / "unexpected.txt").write_text("not in the release manifest", encoding="utf-8")
+    assert verify_package(package) == ["untracked package file: unexpected.txt"]
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert verify_package(package) == [
+        "artwork entry is invalid",
+        "untracked package file: passing-label.svg",
+        "untracked package file: unexpected.txt",
+    ]
+
+
+def test_package_rejects_tracked_symbolic_links(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    artwork = manifest.parent / "passing-label.svg"
+    replacement = tmp_path / "replacement.svg"
+    replacement.write_text(artwork.read_text(encoding="utf-8"), encoding="utf-8")
+    artwork.unlink()
+    artwork.symlink_to(replacement)
+
+    assert verify_package(manifest.parent) == [
+        "artwork file must not be a symbolic link: passing-label.svg"
+    ]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -158,10 +192,37 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     document.save(artwork)
     document.close()
     spec = LabelSpec.from_dict(
-        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "barcode_value": value}, tmp_path
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 100,
+            "min_dpi": 1,
+            "barcode_value": value,
+        },
+        tmp_path,
     )
 
     report = validate(spec)
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_pdf_embedded_image_effective_dpi_is_validated(tmp_path):
+    raster = tmp_path / "low-resolution.png"
+    Image.new("RGB", (100, 100), "black").save(raster)
+    artwork = tmp_path / "low-resolution.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=72, height=72)
+    page.insert_image(page.rect, filename=raster)
+    document.save(artwork)
+    document.close()
+
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+    report = validate(spec)
+
+    assert any(issue.code == "PDF_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+    assert len(report.metadata["pdf"]["images"]) == 1
+    assert report.metadata["pdf"]["images"][0]["dpi"] == 100.0
