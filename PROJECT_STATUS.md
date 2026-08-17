@@ -41,7 +41,7 @@
 ## Verification record
 
 Verified on 2026-08-17 from commits `6d8405b` (PDF effective-DPI enforcement), `02aa587`
-(extractable-text safe areas), and the current package-integrity change set:
+(extractable-text safe areas), and `0cedd6f` (package-integrity verification):
 
 ```text
 python3 -m pytest -q                      # 17 passed
