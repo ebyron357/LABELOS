@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -165,3 +166,105 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_invalid_pdf_fails_with_a_structured_validation_error(tmp_path):
+    artwork = tmp_path / "broken.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "PDF_INVALID" for issue in report.issues)
+
+
+def test_safe_area_accepts_content_inside_bleed_and_safe_inset(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+          <rect width="106" height="56" fill="white"/>
+          <rect x="6" y="6" width="94" height="44" fill="black"/>
+        </svg>
+        """,
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_safe_area_rejects_png_svg_and_pdf_content_in_margin(tmp_path):
+    png = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (1060, 560), "white")
+    ImageDraw.Draw(image).rectangle((10, 100, 900, 500), fill="black")
+    image.save(png, dpi=(254, 254))
+
+    svg = tmp_path / "unsafe.svg"
+    svg.write_text(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">
+          <rect width="106" height="56" fill="white"/>
+          <rect x="1" y="10" width="80" height="30" fill="black"/>
+        </svg>
+        """,
+        encoding="utf-8",
+    )
+
+    pdf = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(pymupdf.Rect(1, 30, 180, 130), color=(0, 0, 0), fill=(0, 0, 0))
+    document.save(pdf)
+    document.close()
+
+    for artwork in (png, svg, pdf):
+        spec = LabelSpec.from_dict(
+            {
+                "artwork": artwork.name,
+                "width_mm": 100,
+                "height_mm": 50,
+                "bleed_mm": 3,
+                "safe_area_mm": 2,
+                "min_dpi": 1,
+            },
+            tmp_path,
+        )
+        report = validate(spec)
+        assert not report.passed, artwork
+        assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues), artwork
+
+
+def test_package_verification_rejects_malformed_unsafe_and_untracked_entries(tmp_path):
+    spec = passing_spec()
+    report = validate(spec)
+    package = create_package(spec, report, tmp_path / "release").parent
+    manifest_path = package / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert "artwork filename is unsafe" in verify_package(package)
+
+    manifest["artwork"]["file"] = "passing-label.svg"
+    manifest["artwork"]["bytes"] = "not-a-byte-count"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert "artwork byte count is invalid" in verify_package(package)
+
+    manifest["artwork"]["bytes"] = (package / "passing-label.svg").stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (package / "unexpected.txt").write_text("untracked", encoding="utf-8")
+    assert "package contains untracked files: unexpected.txt" in verify_package(package)

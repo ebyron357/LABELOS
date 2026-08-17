@@ -11,6 +11,8 @@ from pathlib import Path
 from .models import LabelSpec, Report
 
 MM_PER_POINT = 25.4 / 72
+SAFE_AREA_RENDER_DPI = 300
+BACKGROUND_TOLERANCE = 12
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -32,6 +34,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -118,7 +121,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"PDF could not be opened: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -170,7 +177,7 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         )
         return
     try:
-        with _code_image(spec.artwork, Image) as image:
+        with _artwork_image(spec.artwork, Image) as image:
             results = zxingcpp.read_barcodes(image)
     except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
@@ -182,8 +189,74 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
 
 
-def _code_image(artwork: Path, image_module):
-    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure non-background artwork does not cross the trim safe-area inset."""
+
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+    except ImportError:
+        report.add("SAFE_AREA_UNCHECKED", "error", "Install Pillow to validate the safe area")
+        return
+    try:
+        with _artwork_image(spec.artwork, Image) as image:
+            image = image.convert("RGB")
+            _check_safe_area_pixels(spec, image, report)
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKED", "error", f"Could not inspect safe area: {error}")
+
+
+def _check_safe_area_pixels(spec: LabelSpec, image, report: Report) -> None:
+    width_px, height_px = image.size
+    total_width_mm = spec.width_mm + 2 * spec.bleed_mm
+    total_height_mm = spec.height_mm + 2 * spec.bleed_mm
+    inset_mm = spec.bleed_mm + spec.safe_area_mm
+    left = round(width_px * inset_mm / total_width_mm)
+    top = round(height_px * inset_mm / total_height_mm)
+    right = width_px - left
+    bottom = height_px - top
+    if left >= right or top >= bottom:
+        report.add("SAFE_AREA_UNCHECKED", "error", "Safe area leaves no artwork region to inspect")
+        return
+
+    pixels = image.load()
+    corners = (
+        pixels[0, 0],
+        pixels[width_px - 1, 0],
+        pixels[0, height_px - 1],
+        pixels[width_px - 1, height_px - 1],
+    )
+    background = tuple(round(sum(color[channel] for color in corners) / len(corners)) for channel in range(3))
+    if any(_color_distance(color, background) > BACKGROUND_TOLERANCE for color in corners):
+        report.add(
+            "SAFE_AREA_UNCHECKED",
+            "error",
+            "Artwork corners do not have a uniform background; safe area cannot be determined",
+        )
+        return
+
+    outside_safe_area = (
+        (x, y)
+        for y in range(height_px)
+        for x in range(width_px)
+        if x < left or x >= right or y < top or y >= bottom
+    )
+    if any(_color_distance(pixels[x, y], background) > BACKGROUND_TOLERANCE for x, y in outside_safe_area):
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            f"Artwork content crosses the {spec.safe_area_mm:g} mm safe-area inset from trim",
+        )
+
+
+def _color_distance(first: tuple[int, int, int], second: tuple[int, int, int]) -> int:
+    return max(abs(left - right) for left, right in zip(first, second))
+
+
+def _artwork_image(artwork: Path, image_module):
+    """Return artwork as a Pillow image, rasterizing vector sources at a stable DPI."""
 
     if artwork.suffix.lower() == ".png":
         return image_module.open(artwork)
@@ -194,7 +267,7 @@ def _code_image(artwork: Path, image_module):
         if document.page_count < 1:
             raise ValueError("Artwork contains no pages to decode")
         page = document[0]
-        pixmap = page.get_pixmap(dpi=300, alpha=False)
+        pixmap = page.get_pixmap(dpi=SAFE_AREA_RENDER_DPI, alpha=False)
         image = image_module.open(BytesIO(pixmap.tobytes("png")))
         image.load()
         return image
