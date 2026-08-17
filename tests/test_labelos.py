@@ -7,11 +7,12 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image, ImageDraw
 
 from labelos.cli import main
 from labelos.models import LabelSpec
 from labelos.package import create_package, verify_package
-from labelos.validate import validate
+from labelos.validate import MM_PER_POINT, validate
 
 ROOT = Path(__file__).parent.parent
 
@@ -23,6 +24,7 @@ def passing_spec() -> LabelSpec:
             "width_mm": 100,
             "height_mm": 50,
             "bleed_mm": 3,
+            "safe_area_mm": 2,
             "required_copy": ["Example Product", "NET 250 g"],
         },
         ROOT,
@@ -50,6 +52,72 @@ def test_dimension_mismatch_fails():
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
     )
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
+
+
+def test_safe_area_content_fails_for_svg_fixture():
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": "fixtures/safe-area-violation.svg",
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        ROOT,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_CONTENT" for issue in report.issues)
+    assert report.metadata["safe_area"]["content_pixels"] > 0
+
+
+def test_safe_area_content_fails_for_png(tmp_path):
+    artwork = tmp_path / "unsafe.png"
+    image = Image.new("RGB", (212, 112), "white")
+    ImageDraw.Draw(image).rectangle((7, 40, 8, 70), fill="black")
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+            "min_dpi": 1,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_CONTENT" for issue in report.issues)
+
+
+def test_safe_area_content_fails_for_pdf(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / MM_PER_POINT, height=56 / MM_PER_POINT)
+    page.draw_rect(pymupdf.Rect(3.5 / MM_PER_POINT, 20 / MM_PER_POINT, 4.5 / MM_PER_POINT, 30 / MM_PER_POINT))
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_CONTENT" for issue in report.issues)
 
 
 def test_package_contains_verified_manifest(tmp_path):
