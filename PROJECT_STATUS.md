@@ -31,7 +31,8 @@
 
 ## Verification record
 
-Verified on 2026-08-17 from the current branch before the verification-record commit:
+Verified on 2026-08-17 at implementation commit
+`d50f092aaf1ba9c4ec68e2c7003561c333c3d152`:
 
 ```text
 python3 -m pytest -q                      # 10 passed
