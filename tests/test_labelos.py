@@ -1,5 +1,6 @@
 import json
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -59,7 +60,43 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte size mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_unsafe_or_unexpected_contents(tmp_path):
+    spec = passing_spec()
+    package = tmp_path / "release"
+    create_package(spec, validate(spec), package)
+    (package / "unexpected.txt").write_text("not part of the release", encoding="utf-8")
+    assert verify_package(package) == ["unexpected package file: unexpected.txt"]
+
+
+def test_package_verification_rejects_malformed_manifest_and_report(tmp_path):
+    spec = passing_spec()
+    package = tmp_path / "release"
+    manifest_path = create_package(spec, validate(spec), package)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(package) == [
+        "artwork manifest filename must be a non-empty basename",
+        "unexpected package file: passing-label.svg",
+    ]
+
+    package = tmp_path / "report-release"
+    manifest_path = create_package(spec, validate(spec), package)
+    report_path = package / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["sha256"] = sha256(report_path.read_bytes()).hexdigest()
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(package) == ["validation report does not record a passing validation"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
