@@ -52,15 +52,59 @@ def verify_package(destination: Path) -> list[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return [f"manifest.json is invalid JSON: {error}"]
-    failures = []
+    if not isinstance(manifest, dict):
+        return ["manifest.json must contain a JSON object"]
+    if manifest.get("schema_version") != 1:
+        return ["manifest.json has an unsupported schema_version"]
+    failures: list[str] = []
+    declared_files = {"manifest.json"}
     for key in ("artwork", "validation_report"):
-        entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
-        if not path.is_file():
-            failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
-            failures.append(f"{key} checksum mismatch: {path.name}")
+        entry = manifest.get(key)
+        if not isinstance(entry, dict):
+            failures.append(f"{key} manifest entry is invalid")
+            continue
+        filename = entry.get("file")
+        if not _is_package_filename(filename):
+            failures.append(f"{key} file name is invalid")
+            continue
+        if filename in declared_files:
+            failures.append(f"{key} file duplicates another manifest entry: {filename}")
+            continue
+        declared_files.add(filename)
+        path = destination / filename
+        if path.is_symlink() or not path.is_file():
+            failures.append(f"{key} file is missing or not a regular file: {filename}")
+            continue
+        expected_hash = entry.get("sha256")
+        checksum_matches = False
+        if not isinstance(expected_hash, str) or not _is_sha256(expected_hash):
+            failures.append(f"{key} SHA-256 is invalid: {filename}")
+        else:
+            checksum_matches = expected_hash == _sha256(path)
+            if not checksum_matches:
+                failures.append(f"{key} checksum mismatch: {filename}")
+        expected_bytes = entry.get("bytes")
+        if key == "artwork" and checksum_matches and (
+            not isinstance(expected_bytes, int)
+            or isinstance(expected_bytes, bool)
+            or expected_bytes != path.stat().st_size
+        ):
+            failures.append(f"{key} byte count mismatch: {filename}")
+    if not failures and destination.is_dir():
+        actual_files = {path.name for path in destination.iterdir()}
+        unexpected = sorted(actual_files - declared_files)
+        if unexpected:
+            failures.append(f"package contains untracked files: {', '.join(unexpected)}")
     return failures
+
+
+def _is_package_filename(value: object) -> bool:
+    """Release packages are flat, so manifest paths cannot escape their directory."""
+    return isinstance(value, str) and Path(value).name == value and value not in {"", ".", ".."}
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value.lower())
 
 
 def _sha256(path: Path) -> str:
