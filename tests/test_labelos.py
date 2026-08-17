@@ -1,5 +1,6 @@
 import json
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import qrcode
 from barcode.writer import ImageWriter
 
 from labelos.cli import main
-from labelos.models import LabelSpec
+from labelos.models import LabelSpec, Report
 from labelos.package import create_package, verify_package
 from labelos.validate import validate
 
@@ -59,7 +60,91 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_manifest_includes_complete_report_integrity_metadata(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["schema_version"] == 1
+    assert manifest["validation_report"] == {
+        "bytes": (manifest_path.parent / "validation-report.json").stat().st_size,
+        "file": "validation-report.json",
+        "passed": True,
+        "sha256": _digest(manifest_path.parent / "validation-report.json"),
+    }
+
+
+def test_package_rejects_reserved_artwork_filenames(tmp_path):
+    artwork = tmp_path / "manifest.json"
+    artwork.write_text('<svg width="10mm" height="10mm"/>', encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 10, "height_mm": 10}, tmp_path)
+
+    try:
+        create_package(spec, Report(source=str(artwork)), tmp_path / "release")
+    except ValueError as error:
+        assert "reserved" in str(error)
+    else:
+        raise AssertionError("Expected reserved artwork filename to be rejected")
+
+
+def test_verify_package_rejects_manifest_path_traversal_and_unexpected_files(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = verify_package(manifest_path.parent)
+
+    assert "artwork manifest file is not an allowed package filename" in failures
+    (manifest_path.parent / "unreviewed.txt").write_text("extra", encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "passing-label.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert verify_package(manifest_path.parent) == ["package contains unexpected files: unreviewed.txt"]
+
+
+def test_verify_package_rejects_symlinks_and_inconsistent_validation_report(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest_path.parent
+    artwork = package / "passing-label.svg"
+    artwork.unlink()
+    artwork.symlink_to(ROOT / "fixtures/passing-label.svg")
+    assert verify_package(package) == ["artwork file is missing or not a regular file: passing-label.svg"]
+
+    artwork.unlink()
+    artwork.write_bytes((ROOT / "fixtures/passing-label.svg").read_bytes())
+    report_path = package / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["metadata"]["spec"]["width_mm"] = 999
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest["validation_report"]["sha256"] = _digest(report_path)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(package) == ["validation_report spec does not match manifest spec"]
+
+
+def test_verify_package_rejects_malformed_manifest_and_cli_returns_failure(tmp_path, capsys):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 2
+    manifest["validation_report"]["passed"] = False
+    manifest["extra"] = "unverified"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    failures = verify_package(manifest_path.parent)
+
+    assert "manifest.json has unsupported fields: extra" in failures
+    assert "manifest.json has unsupported schema version" in failures
+    assert "validation_report manifest must record a passing validation" in failures
+    assert main(["verify-package", str(manifest_path.parent), "--json"]) == 1
+    assert not json.loads(capsys.readouterr().out)["passed"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -165,3 +250,7 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def _digest(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
