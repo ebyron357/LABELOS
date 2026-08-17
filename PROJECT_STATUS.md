@@ -37,16 +37,16 @@ Verified on 2026-08-17 from commit `65d067a8006e307072fd8742f96b73b4b49d7611`:
 python3 -m pytest -q
 python3 -m ruff check .
 python3 -m compileall -q labelos tests
-python3 -m build --outdir /tmp/labelos-final-build
+python3 -m build --outdir /tmp/labelos-build-svg-dpi-2541
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-final-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-final-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-svg-dpi-2541 --json
+python3 -m labelos.cli verify-package /tmp/labelos-e2e-svg-dpi-2541 --json
 python3 -m labelos.cli doctor --json
 ```
 
 Results: 10 tests passed; Ruff and compilation passed; the sdist and wheel were generated in
-`/tmp/labelos-final-build`; and the end-to-end package was created and checksum-verified at
-`/tmp/labelos-final-e2e`. `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas
+`/tmp/labelos-build-svg-dpi-2541`; and the end-to-end package was created and checksum-verified at
+`/tmp/labelos-e2e-svg-dpi-2541`. `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas
 pdfToolbox remains unavailable. QR and Code 128 regression tests generate raster, SVG, and PDF
 fixtures and verify their decoded expected values; SVG tests cover both passing and failing
 effective-DPI checks for data-URI raster images. GitHub Actions runs tests, lint, and builds on
