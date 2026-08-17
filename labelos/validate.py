@@ -127,10 +127,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         page = document[0]
         _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
         text = page.get_text()
-        report.checks.extend(["format:pdf", "dimensions", "pdf-readable"])
+        report.checks.extend(["format:pdf", "dimensions", "pdf-readable", "raster-resolution"])
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
+        _validate_pdf_image_resolution(document, page, spec, report)
         return text
     finally:
         document.close()
@@ -145,6 +146,43 @@ def _validate_physical_size(spec: LabelSpec, width: float, height: float, report
             "error",
             f"Artwork is {width:.2f}×{height:.2f} mm; expected {expected[0]:.2f}×{expected[1]:.2f} mm",
         )
+
+
+def _validate_pdf_image_resolution(document, page, spec: LabelSpec, report: Report) -> None:
+    """Check the effective resolution of every raster image placed on a PDF page."""
+    resolutions = []
+    for image in page.get_images(full=True):
+        xref = image[0]
+        try:
+            pixmap = document.extract_image(xref)
+            width, height = pixmap["width"], pixmap["height"]
+            rectangles = page.get_image_rects(xref)
+        except (KeyError, RuntimeError, ValueError) as error:
+            report.add(
+                "PDF_IMAGE_INSPECTION_FAILED",
+                "error",
+                f"Could not inspect embedded image {xref}: {error}",
+            )
+            continue
+        for rectangle in rectangles:
+            if rectangle.width <= 0 or rectangle.height <= 0:
+                report.add(
+                    "PDF_IMAGE_INSPECTION_FAILED",
+                    "error",
+                    f"Embedded image {xref} has an invalid placement rectangle",
+                )
+                continue
+            dpi = min(width / (rectangle.width / 72), height / (rectangle.height / 72))
+            resolutions.append(round(dpi, 2))
+            if dpi < spec.min_dpi:
+                report.add(
+                    "PDF_IMAGE_DPI_TOO_LOW",
+                    "error",
+                    f"Embedded image {xref} has effective resolution {dpi:.1f} DPI; "
+                    f"expected at least {spec.min_dpi} DPI",
+                )
+    if resolutions:
+        report.metadata["pdf"]["embedded_image_dpi"] = resolutions
 
 
 def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
