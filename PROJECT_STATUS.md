@@ -6,6 +6,9 @@
   minimum DPI, and required-copy fields.
 - SVG, PNG, and PDF artwork validation through bundled PyMuPDF, including effective-DPI
   enforcement for every raster image embedded in a PDF.
+- Fail-closed safe-area validation for extractable SVG/PDF text: reports the trim-safe bounds
+  and rejects text that crosses them. Raster artwork and vector artwork without extractable text
+  are reported as `SAFE_AREA_UNVERIFIABLE` rather than assumed safe.
 - QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
@@ -22,6 +25,12 @@
   prepress acceptance profile is in this repository. The software can validate supplied
   specifications, but cannot certify these absent requirements.
 
+## Next engineering priority
+
+1. Add reliable geometry validation for non-text vector artwork and positioned QR/barcodes; the
+   current safe-area check deliberately does not treat those assets as verified.
+2. Enforce effective DPI for raster images embedded in SVG artwork.
+
 ## Next operator steps
 
 1. Add approved product specs and both passing/failing artwork fixtures for every SKU.
@@ -30,34 +39,32 @@
 
 ## Verification record
 
-Verified on 2026-08-17 from the current production-readiness change set:
+Verified on 2026-08-17 from commits `6d8405b` (PDF effective-DPI enforcement) and `02aa587`
+(extractable-text safe areas):
 
 ```text
-python3 -m pytest -q                      # 11 passed
+python3 -m pytest -q                      # 14 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-production-build-pdf-dpi
+python3 -m build --outdir /tmp/labelos-build-safe-area-gTux8a
                                          # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-pdf-dpi-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-pdf-dpi-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-safe-area-983i12/release --json
+python3 -m labelos.cli verify-package /tmp/labelos-e2e-safe-area-983i12/release --json
 python3 -m labelos.cli doctor --json
-python3 -m pip install --no-deps --target /tmp/labelos-wheel-target-pdf-dpi \
-  /tmp/labelos-production-build-pdf-dpi/labelos-0.1.0-py3-none-any.whl
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli validate \
+python3 -m pip install --no-deps --target /tmp/labelos-wheel-safe-area-IugGQF \
+  /tmp/labelos-build-safe-area-gTux8a/labelos-0.1.0-py3-none-any.whl
+PYTHONPATH=/tmp/labelos-wheel-safe-area-IugGQF python3 -m labelos.cli validate \
   examples/label.json --json
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli package \
-  examples/label.json /tmp/labelos-wheel-package-pdf-dpi --json
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli verify-package \
-  /tmp/labelos-wheel-package-pdf-dpi --json
 ```
 
-Results: 11 tests passed; Ruff, bytecode compilation, and dependency consistency checks
-passed; the sdist and wheel were created in `/tmp/labelos-production-build-pdf-dpi`; and
-source and isolated-wheel CLI packages were created and checksum-verified.
+Results: 14 tests passed; Ruff, bytecode compilation, and dependency consistency checks
+passed; the sdist and wheel were created in `/tmp/labelos-build-safe-area-gTux8a`; source
+CLI packaging was created and checksum-verified in `/tmp/labelos-e2e-safe-area-983i12/release`;
+the isolated wheel validated the example configuration.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. PDF raster-image DPI regression coverage includes both a rejected
-72-DPI image and an accepted 600-DPI image. GitHub Actions runs tests, lint, and builds on
-Python 3.10 and 3.12.
+72-DPI image and an accepted 600-DPI image; safe-area coverage includes accepted SVG text plus
+rejected SVG and PDF text. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.

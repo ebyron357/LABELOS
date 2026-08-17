@@ -38,6 +38,10 @@ image fails validation even when the PDF page dimensions are correct. If `barcod
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
 code was checked.
 
+When `safe_area_mm` is configured, LABELOS verifies extractable SVG and PDF text bounding boxes
+against the trim-safe rectangle (the bleed + safe-area inset). It fails closed when SVG/PDF text
+geometry or raster-artwork text geometry cannot be inspected.
+
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
@@ -54,3 +58,7 @@ The core validator provides reproducible local checks and package integrity. Com
 prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
 and a Callas adapter are not present in this repository; they must be supplied and approved
 by the appropriate owner before a particular label can be certified for print.
+
+Safe-area validation currently covers extractable text only; it does not establish the safe
+placement of non-text vector artwork, positioned barcodes, or raster content. Those assets need
+an approved prepress profile or further geometry support before they can be certified.
