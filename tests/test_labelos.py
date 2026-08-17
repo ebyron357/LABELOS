@@ -1,3 +1,4 @@
+import hashlib
 import json
 from base64 import b64encode
 from io import BytesIO
@@ -127,7 +128,39 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert "artwork checksum mismatch: passing-label.svg" in verify_package(manifest.parent)
+
+
+def test_verify_package_rejects_unexpected_and_unsafe_entries(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    (manifest.parent / "unexpected.txt").write_text("not part of the release", encoding="utf-8")
+
+    assert "package contains unexpected files: unexpected.txt" in verify_package(manifest.parent)
+
+    (manifest.parent / "unexpected.txt").unlink()
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert "artwork file name is unsafe" in verify_package(manifest.parent)
+
+
+def test_verify_package_rejects_non_passing_or_mismatched_report(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report["metadata"]["spec"]["width_mm"] = 999
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    failures = verify_package(manifest.parent)
+
+    assert "validation report does not record a passing validation" in failures
+    assert "validation report specification does not match manifest" in failures
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
