@@ -35,8 +35,8 @@
 
 ## Verification record
 
-Verified on 2026-08-17 after `f4bd1c9` (safe-area enforcement) and `ea21d5f`
-(release-package verification):
+Verified on 2026-08-17 from implementation commit
+`60c9a33229c95daf601d54bcced1f77bf377ea4d`:
 
 ```text
 python3 -m pytest -q                      # 14 passed
@@ -51,8 +51,8 @@ python3 -m labelos.cli doctor --json
 
 Results: 14 tests passed; Ruff and compilation passed; sdist and wheel were generated in
 `/tmp/labelos-final-build`; and the end-to-end package was created and checksum-verified at
-`/tmp/labelos-final-e2e`. The passing fixture recorded zero safe-area content pixels; the
-failing CLI fixture returned exit 1 with `SAFE_AREA_CONTENT`. Package tests also reject
+`/tmp/labelos-final-e2e`. The passing fixture recorded zero safe-area content pixels; safe-area
+failure fixtures for SVG, PNG, and PDF report `SAFE_AREA_CONTENT`. Package tests also reject
 unexpected files, unsafe manifest paths, and altered/non-passing reports.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify decoded
