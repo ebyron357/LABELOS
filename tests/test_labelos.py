@@ -144,6 +144,32 @@ def test_qr_expected_value_is_decoded_from_svg(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+    assert report.metadata["svg_embedded_images"][0]["dpi"] >= 300
+
+
+def test_under_resolution_embedded_svg_image_fails(tmp_path):
+    image = qrcode.make("https://example.test/low-resolution")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    artwork = tmp_path / "low-resolution.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100">'
+            f'<image href="data:image/png;base64,{b64encode(buffer.getvalue()).decode()}" '
+            'width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
+    assert [issue.code for issue in report.issues] == ["SVG_EMBEDDED_IMAGE_DPI_TOO_LOW"]
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
