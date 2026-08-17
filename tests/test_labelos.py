@@ -70,9 +70,13 @@ def test_package_contains_verified_manifest(tmp_path):
     report = validate(spec)
     manifest = create_package(spec, report, tmp_path / "release")
     assert manifest.is_file()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["schema_version"] == 2
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte size mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
 
 
 def test_package_verification_rejects_malformed_and_unsafe_manifests(tmp_path):
@@ -80,7 +84,10 @@ def test_package_verification_rejects_malformed_and_unsafe_manifests(tmp_path):
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["artwork"] = []
     manifest.write_text(json.dumps(data), encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork manifest entry is invalid"]
+    assert verify_package(manifest.parent) == [
+        "artwork entry is missing or invalid",
+        "package contains unexpected files: passing-label.svg",
+    ]
 
     external_artwork = tmp_path / "external.svg"
     external_artwork.write_text("untracked artwork", encoding="utf-8")
@@ -91,14 +98,44 @@ def test_package_verification_rejects_malformed_and_unsafe_manifests(tmp_path):
         "sha256": hashlib.sha256(external_artwork.read_bytes()).hexdigest(),
     }
     manifest.write_text(json.dumps(data), encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork file name is invalid"]
+    assert verify_package(manifest.parent) == [
+        "artwork file name is unsafe",
+        "package contains unexpected files: passing-label.svg",
+    ]
 
 
 def test_package_verification_rejects_untracked_files(tmp_path):
     manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
     (manifest.parent / "unexpected.txt").write_text("not in manifest", encoding="utf-8")
 
-    assert verify_package(manifest.parent) == ["package contains untracked files: unexpected.txt"]
+    assert verify_package(manifest.parent) == ["package contains unexpected files: unexpected.txt"]
+
+
+def test_package_verification_rejects_changed_report_even_with_updated_checksum(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    report_path = manifest.parent / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["validation_report"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    data["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == ["validation report does not record a passing validation"]
+
+
+def test_package_verification_rejects_symlinked_artwork(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    artwork = manifest.parent / "passing-label.svg"
+    saved = manifest.parent / "saved-artwork.svg"
+    artwork.rename(saved)
+    artwork.symlink_to(saved.name)
+
+    assert verify_package(manifest.parent) == [
+        "package contains unexpected files: saved-artwork.svg",
+        "artwork file is missing: passing-label.svg",
+    ]
 
 
 def test_safe_area_accepts_content_inside_bleed_and_safe_inset(tmp_path):
