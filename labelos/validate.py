@@ -32,6 +32,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -190,6 +191,82 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
     for value in spec.required_copy:
         if value not in text:
             report.add("REQUIRED_COPY_MISSING", "error", f"Required copy not found: {value!r}")
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure extractable vector text is inside the configured trim-safe rectangle."""
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    if spec.artwork.suffix.lower() == ".png":
+        report.add(
+            "SAFE_AREA_UNVERIFIABLE",
+            "error",
+            "Raster artwork does not expose text geometry for safe-area validation",
+        )
+        return
+    try:
+        import pymupdf
+
+        document = pymupdf.open(spec.artwork)
+        try:
+            if document.page_count != 1:
+                report.add(
+                    "SAFE_AREA_UNVERIFIABLE",
+                    "error",
+                    "Safe-area validation requires exactly one artwork page",
+                )
+                return
+            page = document[0]
+            safe_inset = (spec.bleed_mm + spec.safe_area_mm) / MM_PER_POINT
+            safe_bounds = pymupdf.Rect(
+                safe_inset,
+                safe_inset,
+                page.rect.width - safe_inset,
+                page.rect.height - safe_inset,
+            )
+            report.metadata["safe_area_bounds_pt"] = {
+                "left": round(safe_bounds.x0, 3),
+                "top": round(safe_bounds.y0, 3),
+                "right": round(safe_bounds.x1, 3),
+                "bottom": round(safe_bounds.y1, 3),
+            }
+            text_boxes = _text_boxes(page)
+        finally:
+            document.close()
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNVERIFIABLE", "error", f"Could not inspect text geometry: {error}")
+        return
+
+    if not text_boxes:
+        report.add(
+            "SAFE_AREA_UNVERIFIABLE",
+            "error",
+            "Artwork has no extractable text geometry for safe-area validation",
+        )
+        return
+    for box in text_boxes:
+        if not safe_bounds.contains(box):
+            report.add(
+                "SAFE_AREA_VIOLATION",
+                "error",
+                "Extractable text extends outside the configured safe area",
+            )
+            return
+
+
+def _text_boxes(page) -> list:
+    import pymupdf
+
+    boxes = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                if span.get("text", "").strip():
+                    boxes.append(pymupdf.Rect(span["bbox"]))
+    return boxes
 
 
 def _validate_codes(spec: LabelSpec, report: Report) -> None:

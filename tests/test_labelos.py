@@ -175,6 +175,83 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     assert report.metadata["decoded_values"] == [value]
 
 
+def test_safe_area_accepts_extractable_svg_text_inside_bounds(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" '
+            'viewBox="0 0 106 56"><text x="10" y="20">Safe copy</text></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+    assert report.metadata["safe_area_bounds_pt"]["left"] == 14.173
+
+
+def test_safe_area_rejects_svg_text_outside_bounds(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" '
+            'viewBox="0 0 106 56"><text x="1" y="20">Unsafe copy</text></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
+def test_safe_area_rejects_pdf_text_outside_bounds(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.insert_text((2, 50), "Unsafe copy", fontsize=10)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "safe_area_mm": 2,
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
 def test_pdf_embedded_image_dpi_is_enforced(tmp_path):
     image_path = tmp_path / "source.png"
     Image.new("RGB", (72, 72), "black").save(image_path)
