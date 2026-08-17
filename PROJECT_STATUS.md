@@ -14,7 +14,8 @@
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
 - Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+  and SHA-256 checksums, with fail-closed inventory, schema, byte-count, checksum,
+  report-binding, and symbolic-link verification.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -39,15 +40,15 @@
 
 ## Verification record
 
-Verified on 2026-08-17 from commits `6d8405b` (PDF effective-DPI enforcement) and `02aa587`
-(extractable-text safe areas):
+Verified on 2026-08-17 from commits `6d8405b` (PDF effective-DPI enforcement), `02aa587`
+(extractable-text safe areas), and the current package-integrity change set:
 
 ```text
-python3 -m pytest -q                      # 14 passed
+python3 -m pytest -q                      # 17 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-build-safe-area-gTux8a
+python3 -m build --outdir /tmp/labelos-build-package-integrity-6qDCJb
                                          # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
 python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-safe-area-983i12/release --json
@@ -59,12 +60,15 @@ PYTHONPATH=/tmp/labelos-wheel-safe-area-IugGQF python3 -m labelos.cli validate \
   examples/label.json --json
 ```
 
-Results: 14 tests passed; Ruff, bytecode compilation, and dependency consistency checks
-passed; the sdist and wheel were created in `/tmp/labelos-build-safe-area-gTux8a`; source
-CLI packaging was created and checksum-verified in `/tmp/labelos-e2e-safe-area-983i12/release`;
-the isolated wheel validated the example configuration.
+Results: 17 tests passed; Ruff, bytecode compilation, and dependency consistency checks
+passed; the sdist and wheel were created in `/tmp/labelos-build-package-integrity-6qDCJb`;
+source CLI packaging was created and checksum-verified in
+`/tmp/labelos-package-final-e2e-Qa74WA/release`; the isolated wheel validated the example
+configuration.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. PDF raster-image DPI regression coverage includes both a rejected
 72-DPI image and an accepted 600-DPI image; safe-area coverage includes accepted SVG text plus
-rejected SVG and PDF text. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
+rejected SVG and PDF text. Package-verification regressions reject extra files, package and
+artifact symlinks, incorrect byte counts, checksum mismatches, and a validation-report/manifest
+mismatch. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.

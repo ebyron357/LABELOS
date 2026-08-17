@@ -1,5 +1,6 @@
 import json
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -60,7 +61,56 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    assert verify_package(manifest.parent) == [
+        "artwork byte count mismatch: passing-label.svg",
+        "artwork checksum mismatch: passing-label.svg",
+    ]
+
+
+def test_package_verification_rejects_untracked_entries_and_symlinks(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    (package / "unexpected.txt").write_text("untracked", encoding="utf-8")
+    assert verify_package(package) == ["untracked package entry: unexpected.txt"]
+
+    (package / "unexpected.txt").unlink()
+    (package / "linked.svg").symlink_to(package / "passing-label.svg")
+    assert verify_package(package) == ["untracked package entry: linked.svg"]
+
+    (package / "linked.svg").unlink()
+    replacement = tmp_path / "replacement.svg"
+    replacement.write_text("replacement", encoding="utf-8")
+    (package / "passing-label.svg").unlink()
+    (package / "passing-label.svg").symlink_to(replacement)
+    assert verify_package(package) == ["artwork file is a symbolic link: passing-label.svg"]
+
+    alias = tmp_path / "release-alias"
+    alias.symlink_to(package, target_is_directory=True)
+    assert verify_package(alias) == ["package directory is a symbolic link"]
+
+
+def test_package_verification_rejects_manifest_byte_count_mismatch(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["bytes"] += 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == ["artwork byte count mismatch: passing-label.svg"]
+
+
+def test_package_verification_checks_validation_report_binding(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest_path.parent
+    report_path = package / "validation-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["passed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["validation_report"]["sha256"] = sha256(report_path.read_bytes()).hexdigest()
+    manifest["validation_report"]["bytes"] = report_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(package) == ["validation report did not pass"]
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

@@ -48,7 +48,8 @@ geometry or raster-artwork text geometry cannot be inspected.
   required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+- `labelos verify-package DESTINATION`: fail-closed verification of the package inventory,
+  schema, byte counts, SHA-256 checksums, report-to-manifest binding, and symbolic links.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
@@ -62,3 +63,7 @@ by the appropriate owner before a particular label can be certified for print.
 Safe-area validation currently covers extractable text only; it does not establish the safe
 placement of non-text vector artwork, positioned barcodes, or raster content. Those assets need
 an approved prepress profile or further geometry support before they can be certified.
+
+Package verification establishes internal consistency, not provenance. A package must be
+distributed through a controlled channel or signed by a separately managed signing system when
+its manifest itself needs tamper-evident provenance.
