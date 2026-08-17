@@ -31,7 +31,7 @@
 
 ## Verification record
 
-Verified on 2026-08-17 from commit `PENDING`:
+Verified on 2026-08-17 from commit `65d067a8006e307072fd8742f96b73b4b49d7611`:
 
 ```text
 python3 -m pytest -q
