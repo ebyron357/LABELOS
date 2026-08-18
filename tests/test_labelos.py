@@ -52,6 +52,19 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_malformed_pdf_fails_with_structured_issue(tmp_path):
+    artwork = tmp_path / "malformed.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -80,6 +93,21 @@ def test_cli_validate_and_package(tmp_path, capsys):
     package = tmp_path / "release"
     assert main(["package", str(config), str(package)]) == 0
     assert main(["verify-package", str(package)]) == 0
+
+
+def test_cli_malformed_pdf_returns_failed_json_report(tmp_path, capsys):
+    artwork = tmp_path / "malformed.pdf"
+    artwork.write_text("not a PDF", encoding="utf-8")
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}),
+        encoding="utf-8",
+    )
+
+    assert main(["validate", str(config), "--json"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert not result["passed"]
+    assert [issue["code"] for issue in result["issues"]] == ["PDF_INVALID"]
 
 
 def test_qr_expected_value_is_decoded(tmp_path):
