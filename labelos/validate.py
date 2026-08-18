@@ -30,9 +30,10 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
-    _validate_required_copy(spec, text, report)
-    _validate_codes(spec, report)
-    _validate_safe_area(spec, report)
+    if text is not None:
+        _validate_required_copy(spec, text, report)
+        _validate_codes(spec, report)
+        _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -44,11 +45,11 @@ def validate(spec: LabelSpec) -> Report:
     return report
 
 
-def _validate_png(spec: LabelSpec, report: Report) -> str:
+def _validate_png(spec: LabelSpec, report: Report) -> str | None:
     data = spec.artwork.read_bytes()
     if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
         report.add("PNG_INVALID", "error", "File is not a valid PNG")
-        return ""
+        return None
     width, height = struct.unpack(">II", data[16:24])
     dpi = _png_dpi(data)
     report.checks.extend(["format:png", "dimensions", "raster-resolution"])
@@ -89,12 +90,12 @@ def _validate_pixel_dimensions(
         )
 
 
-def _validate_svg(spec: LabelSpec, report: Report) -> str:
+def _validate_svg(spec: LabelSpec, report: Report) -> str | None:
     text = spec.artwork.read_text(encoding="utf-8", errors="replace")
     match = re.search(r"<svg\b[^>]*>", text, re.IGNORECASE)
     if not match:
         report.add("SVG_INVALID", "error", "No SVG root element found")
-        return text
+        return None
     root = match.group(0)
     width, height = (_svg_mm(root, "width"), _svg_mm(root, "height"))
     report.checks.extend(["format:svg", "dimensions"])
@@ -113,17 +114,21 @@ def _svg_mm(root: str, attr: str) -> float | None:
     return value * {"mm": 1, "cm": 10, "in": 25.4, "pt": MM_PER_POINT}[unit]
 
 
-def _validate_pdf(spec: LabelSpec, report: Report) -> str:
+def _validate_pdf(spec: LabelSpec, report: Report) -> str | None:
     try:
         import pymupdf
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
-        return ""
-    document = pymupdf.open(spec.artwork)
+        return None
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return None
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
-            return ""
+            return None
         page = document[0]
         _validate_physical_size(spec, page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT, report)
         text = page.get_text()

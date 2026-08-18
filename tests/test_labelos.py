@@ -53,6 +53,27 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_malformed_pdf_fails_closed_without_dependent_checks(tmp_path):
+    artwork = tmp_path / "broken.pdf"
+    artwork.write_bytes(b"%PDF-not-a-real-document")
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "required_copy": ["Required text"],
+            "barcode_value": "expected-code",
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PDF_INVALID"]
+    assert report.checks == []
+
+
 def test_safe_area_passes_when_artwork_stays_inside_boundary(tmp_path):
     artwork = tmp_path / "safe.png"
     image = Image.new("RGB", (1060, 560), "white")
