@@ -92,10 +92,11 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-18 from implementation commit
+`9b6a931101428f8f58f5393184a09d69000d63d5`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python3 -m pytest -q                     # 61 passed
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -106,6 +107,8 @@ labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
 labelos package examples/label.json storage/demo-release
 labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
+# linked SVG raster fixtures: low-DPI / missing / traversal / remote links fail;
+# a high-DPI local link is copied into the package and checksum-verified
 ```
 
-Callas pdfToolbox remains unavailable and is never reported as PASS.
+Callas pdfToolbox remains TOOL UNAVAILABLE/BLOCKED and is never reported as PASS.
