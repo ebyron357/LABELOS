@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative references are DPI-checked, packaged, and checksummed; unsafe, missing, remote, traversal, and symlink references fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -61,6 +61,9 @@ labelos verify-package storage/demo-release
    be reported as safe-area violations; keep live matter inside the inset.
 4. **No approved printer profile is loaded.** Do not invent printer-specific limits.
 5. **Live Illustrator generation is blocked** without a licensed workstation and template.
+6. **Linked SVG raster assets must remain local and beneath the SVG directory.** Network URLs,
+   symlinks, path traversal, missing files, and query/fragment references are intentionally
+   rejected so a release package is complete and reproducible.
 
 ## Future roadmap (documented, not built in this pass)
 
@@ -89,10 +92,11 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-18 from implementation commit
+`9b6a931101428f8f58f5393184a09d69000d63d5`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python3 -m pytest -q                     # 61 passed
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -103,6 +107,8 @@ labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
 labelos package examples/label.json storage/demo-release
 labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
+# linked SVG raster fixtures: low-DPI / missing / traversal / remote links fail;
+# a high-DPI local link is copied into the package and checksum-verified
 ```
 
-Callas pdfToolbox remains unavailable and is never reported as PASS.
+Callas pdfToolbox remains TOOL UNAVAILABLE/BLOCKED and is never reported as PASS.

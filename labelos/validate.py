@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
 from .preflight import get_preflight_adapter
+from .svg_assets import local_svg_image_path
 
 MM_PER_POINT = 25.4 / 72
 MM_PER_CSS_PIXEL = 25.4 / 96
@@ -237,12 +238,21 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
-            if data is None:
-                continue
             from PIL import Image
 
-            with Image.open(BytesIO(data)) as raster:
+            source: str
+            if data is None:
+                source_path = local_svg_image_path(spec.artwork, href)
+                if source_path is None:
+                    raise ValueError("embedded SVG images are not supported as raster assets")
+                raster_source = source_path
+                source = str(source_path.relative_to(spec.artwork.parent.resolve()))
+            else:
+                raster_source = BytesIO(data)
+                source = "embedded"
+            with Image.open(raster_source) as raster:
                 pixels = raster.size
+                raster.load()
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
                 pixels[0] / (display_width / 25.4),
@@ -254,20 +264,27 @@ def _validate_svg_embedded_rasters(
                     "pixels": {"width": pixels[0], "height": pixels[1]},
                     "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
                     "dpi": round(effective_dpi, 2),
+                    "source": source,
                 }
             )
             if effective_dpi < spec.min_dpi:
                 report.add(
-                    "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
+                    (
+                        "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW"
+                        if source == "embedded"
+                        else "SVG_LINKED_IMAGE_DPI_TOO_LOW"
+                    ),
                     "error",
-                    f"Embedded image {index} has effective resolution {effective_dpi:.1f} DPI; "
+                    f"SVG image {index} has effective resolution {effective_dpi:.1f} DPI; "
                     f"minimum is {spec.min_dpi} DPI",
                 )
         except (ImportError, OSError, ValueError) as error:
             report.add(
-                "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
+                "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED"
+                if href.startswith("data:")
+                else "SVG_LINKED_IMAGE_INSPECTION_FAILED",
                 "error",
-                f"Could not inspect embedded image {index}: {error}",
+                f"Could not inspect SVG image {index}: {error}",
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
