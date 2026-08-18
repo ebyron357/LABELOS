@@ -39,7 +39,9 @@ code was checked.
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  safe-area bounds, required copy, and configured barcode/QR values. Safe-area inspection
+  rasterizes vector artwork at 300 DPI and fails closed if it cannot establish a uniform
+  canvas background.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
 - `labelos verify-package DESTINATION`: verifies package checksums.
