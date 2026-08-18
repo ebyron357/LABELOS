@@ -53,6 +53,46 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_truncated_png_fails_closed(tmp_path):
+    artwork = tmp_path / "truncated.png"
+    artwork.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + (100).to_bytes(4, "big") * 2)
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 1}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["PNG_INVALID"]
+
+
+def test_malformed_svg_fails_closed(tmp_path):
+    artwork = tmp_path / "malformed.svg"
+    artwork.write_text('<svg width="100mm" height="50mm"><text>broken</svg>', encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["SVG_INVALID"]
+
+
+def test_malformed_pdf_fails_closed_in_cli(tmp_path, capsys):
+    artwork = tmp_path / "malformed.pdf"
+    artwork.write_bytes(b"not a PDF")
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}),
+        encoding="utf-8",
+    )
+
+    assert main(["validate", str(config), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+
+    assert not report["passed"]
+    assert [issue["code"] for issue in report["issues"]] == ["PDF_INVALID"]
+
+
 def test_safe_area_passes_when_artwork_stays_inside_boundary(tmp_path):
     artwork = tmp_path / "safe.png"
     image = Image.new("RGB", (1060, 560), "white")

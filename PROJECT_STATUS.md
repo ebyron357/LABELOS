@@ -4,9 +4,9 @@
 
 - JSON label specification validation with physical dimensions, bleed, enforced safe-area,
   minimum DPI, and required-copy fields.
-<<<<<<< HEAD
 - SVG, PNG, and PDF artwork validation through bundled PyMuPDF, including effective-DPI
-  enforcement for every raster image embedded in a PDF.
+  enforcement for every raster image embedded in a PDF; malformed artwork is rejected
+  before dependent content, code, or safe-area checks run.
 - Fail-closed safe-area inspection: SVG/PDF artwork is rasterized at 300 DPI and PNG is
   inspected directly. Non-background content outside the trim-safe inset, ambiguous corner
   backgrounds, and transparent PNG artwork fail validation.
@@ -36,32 +36,35 @@
 
 ## Verification record
 
-Verified on 2026-08-17 from the current production-readiness change set:
+Verified on 2026-08-18 from commit `0a03677` plus the uncommitted malformed-artwork
+hardening documented here:
 
 ```text
-python3 -m pytest -q                      # 11 passed
+python3 -m pytest -q                      # 19 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-production-build-pdf-dpi
+python3 -m build --outdir /tmp/labelos-production-build-36Lxle
                                          # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-pdf-dpi-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-pdf-dpi-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-production-package-J0RVJZ --json
+python3 -m labelos.cli verify-package /tmp/labelos-production-package-J0RVJZ --json
 python3 -m labelos.cli doctor --json
-python3 -m pip install --no-deps --target /tmp/labelos-wheel-target-pdf-dpi \
-  /tmp/labelos-production-build-pdf-dpi/labelos-0.1.0-py3-none-any.whl
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli validate \
+python3 -m pip install --no-deps --target /tmp/labelos-wheel-target-qY6Vtb \
+  /tmp/labelos-production-build-36Lxle/labelos-0.1.0-py3-none-any.whl
+PYTHONPATH=/tmp/labelos-wheel-target-qY6Vtb python3 -m labelos.cli validate \
   examples/label.json --json
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli package \
-  examples/label.json /tmp/labelos-wheel-package-pdf-dpi --json
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli verify-package \
-  /tmp/labelos-wheel-package-pdf-dpi --json
+PYTHONPATH=/tmp/labelos-wheel-target-qY6Vtb python3 -m labelos.cli package \
+  examples/label.json /tmp/labelos-wheel-package-O1KGQG --json
+PYTHONPATH=/tmp/labelos-wheel-target-qY6Vtb python3 -m labelos.cli verify-package \
+  /tmp/labelos-wheel-package-O1KGQG --json
 ```
 
-Results: 11 tests passed; Ruff, bytecode compilation, and dependency consistency checks
-passed; the sdist and wheel were created in `/tmp/labelos-production-build-pdf-dpi`; and
-source and isolated-wheel CLI packages were created and checksum-verified.
+Results: 19 tests passed; Ruff, bytecode compilation, and dependency consistency checks
+passed; the sdist and wheel were created in `/tmp/labelos-production-build-36Lxle`; and source
+and isolated-wheel CLI packages were created and checksum-verified. Regression fixtures cover
+malformed PDF through the operator CLI, truncated PNG, malformed SVG, safe-area violations, and
+PDF raster-image DPI failures.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. PDF raster-image DPI regression coverage includes both a rejected

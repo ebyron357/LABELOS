@@ -34,7 +34,9 @@ Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset
 and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
 LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. Every raster image embedded
 in a PDF is checked at its placed (effective) resolution against `min_dpi`; a low-resolution
-image fails validation even when the PDF page dimensions are correct. If `barcode_value` or
+image fails validation even when the PDF page dimensions are correct. Malformed PNG, SVG, and
+PDF artwork fails validation without running dependent content, code, or safe-area checks. If
+`barcode_value` or
 `qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
 code was checked.
 

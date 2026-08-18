@@ -7,6 +7,7 @@ import struct
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
+from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
 
@@ -30,9 +31,17 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    if not report.passed:
+        _record_spec_metadata(spec, report)
+        return report
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
     _validate_safe_area(spec, report)
+    _record_spec_metadata(spec, report)
+    return report
+
+
+def _record_spec_metadata(spec: LabelSpec, report: Report) -> None:
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -41,7 +50,6 @@ def validate(spec: LabelSpec) -> Report:
         "safe_area_mm": spec.safe_area_mm,
         "min_dpi": spec.min_dpi,
     }
-    return report
 
 
 def _validate_png(spec: LabelSpec, report: Report) -> str:
@@ -50,6 +58,19 @@ def _validate_png(spec: LabelSpec, report: Report) -> str:
         report.add("PNG_INVALID", "error", "File is not a valid PNG")
         return ""
     width, height = struct.unpack(">II", data[16:24])
+    try:
+        from PIL import Image
+    except ImportError:
+        report.add("PNG_READER_UNAVAILABLE", "error", "Install Pillow to inspect PNG artwork")
+        return ""
+    try:
+        with Image.open(spec.artwork) as image:
+            if image.format != "PNG":
+                raise ValueError("Pillow did not identify the file as PNG")
+            image.verify()
+    except (OSError, SyntaxError, ValueError) as error:
+        report.add("PNG_INVALID", "error", f"PNG cannot be decoded: {error}")
+        return ""
     dpi = _png_dpi(data)
     report.checks.extend(["format:png", "dimensions", "raster-resolution"])
     report.metadata["pixels"] = {"width": width, "height": height}
@@ -91,6 +112,17 @@ def _validate_pixel_dimensions(
 
 def _validate_svg(spec: LabelSpec, report: Report) -> str:
     text = spec.artwork.read_text(encoding="utf-8", errors="replace")
+    if "<!DOCTYPE" in text.upper():
+        report.add("SVG_INVALID", "error", "SVG document type declarations are not allowed")
+        return text
+    try:
+        document = ElementTree.fromstring(text)
+    except ElementTree.ParseError as error:
+        report.add("SVG_INVALID", "error", f"SVG cannot be parsed: {error}")
+        return text
+    if not document.tag.lower().endswith("svg"):
+        report.add("SVG_INVALID", "error", "SVG root element must be svg")
+        return text
     match = re.search(r"<svg\b[^>]*>", text, re.IGNORECASE)
     if not match:
         report.add("SVG_INVALID", "error", "No SVG root element found")
@@ -119,7 +151,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -133,6 +169,9 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
         _validate_pdf_image_resolution(document, page, spec, report)
         return text
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not inspect PDF artwork: {error}")
+        return ""
     finally:
         document.close()
 
