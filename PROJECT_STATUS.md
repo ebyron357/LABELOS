@@ -93,7 +93,7 @@ Verified on 2026-08-18 from branch `cursor/label-production-system-readiness-746
 after release-integrity and linked-SVG hardening:
 
 ```text
-python -m pytest -q                      # see current run verification
+python -m pytest -q                      # 69 passed, 1 FastAPI dependency warning
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
