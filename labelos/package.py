@@ -55,7 +55,11 @@ def verify_package(destination: Path) -> list[str]:
     failures = []
     for key in ("artwork", "validation_report"):
         entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
+        filename = entry.get("file", "")
+        if not isinstance(filename, str) or not _is_safe_package_filename(filename):
+            failures.append(f"{key} file path is unsafe: {filename}")
+            continue
+        path = destination / filename
         if not path.is_file():
             failures.append(f"{key} file is missing: {path.name}")
         elif entry.get("sha256") != _sha256(path):
@@ -69,3 +73,14 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _is_safe_package_filename(filename: str) -> bool:
+    """Allow only a direct child of the release directory from an untrusted manifest."""
+    return (
+        bool(filename)
+        and filename not in {".", ".."}
+        and "/" not in filename
+        and "\\" not in filename
+        and Path(filename).name == filename
+    )

@@ -62,6 +62,18 @@ def test_package_contains_verified_manifest(tmp_path):
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
 
 
+def test_package_rejects_manifest_paths_outside_the_release_directory(tmp_path):
+    spec = passing_spec()
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    contents["artwork"]["file"] = "../untrusted-artwork.svg"
+    manifest.write_text(json.dumps(contents), encoding="utf-8")
+
+    assert verify_package(manifest.parent) == [
+        "artwork file path is unsafe: ../untrusted-artwork.svg",
+    ]
+
+
 def test_cli_validate_and_package(tmp_path, capsys):
     config = tmp_path / "label.json"
     config.write_text(
