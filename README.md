@@ -31,18 +31,22 @@ The configuration is JSON:
 ```
 
 Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
-and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. If `barcode_value` or
-`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+and PDF artwork are accepted. A nonzero `safe_area_mm` checks visible artwork against the
+trim-safe bounds; SVG and PDF are rendered at 300 DPI for this check. PNG resolution is
+validated from its pixels, and every placed raster image in a PDF is checked at its effective
+placement DPI. SVG and PDF are also rendered at 300 DPI before barcode/QR decoding. If
+`barcode_value` or `qr_value` is configured but the decoder cannot load, validation fails
+rather than asserting a code was checked.
 
 ## Commands
 
-- `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
-- `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+- `labelos validate CONFIG [--json]`: validate format, dimensions, trim-safe area, raster
+  resolution, required copy, and configured barcode/QR values.
+- `labelos package CONFIG DESTINATION`: validates, then writes artwork, the resolved JSON
+  specification, a JSON validation report, and a SHA-256 manifest. Existing package
+  destinations are never overwritten.
+- `labelos verify-package DESTINATION`: verifies manifest structure, safe package filenames,
+  regular files, byte counts, checksums, and report/spec/artwork consistency.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
