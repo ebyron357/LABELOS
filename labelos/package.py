@@ -119,7 +119,11 @@ def verify_package(destination: Path) -> list[str]:
                 linked_asset_paths[name] = path
 
     _validate_report_and_spec(manifest, entries, failures)
-    _validate_linked_assets(entries.get("artwork"), linked_asset_paths, failures)
+    # Integrity failures are decisive and can make the SVG unparsable. Do not add
+    # derivative parsing noise when a checksum/manifest error already identifies
+    # the release artifact that must be restored.
+    if not failures:
+        _validate_linked_assets(entries.get("artwork"), linked_asset_paths, failures)
     return failures
 
 
