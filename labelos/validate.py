@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import struct
 from collections.abc import Callable
@@ -30,8 +31,17 @@ def validate(spec: LabelSpec) -> Report:
         report.add("FORMAT_UNSUPPORTED", "error", f"Unsupported artwork format: {suffix}")
         return report
     text = validator(spec, report)
+    if any(issue.code in {"PDF_INVALID", "PDF_READER_UNAVAILABLE"} for issue in report.issues):
+        _add_spec_metadata(spec, report)
+        return report
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
+    _add_spec_metadata(spec, report)
+    return report
+
+
+def _add_spec_metadata(spec: LabelSpec, report: Report) -> None:
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -40,7 +50,6 @@ def validate(spec: LabelSpec) -> Report:
         "safe_area_mm": spec.safe_area_mm,
         "min_dpi": spec.min_dpi,
     }
-    return report
 
 
 def _validate_png(spec: LabelSpec, report: Report) -> str:
@@ -118,7 +127,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -170,7 +183,7 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
         )
         return
     try:
-        with _code_image(spec.artwork, Image) as image:
+        with _artwork_image(spec.artwork, Image) as image:
             results = zxingcpp.read_barcodes(image)
     except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
         report.add("CODE_DECODE_FAILED", "error", f"Could not decode artwork: {error}")
@@ -182,8 +195,71 @@ def _validate_codes(spec: LabelSpec, report: Report) -> None:
             report.add("CODE_VALUE_MISMATCH", "error", f"Expected {kind} value not decoded: {expected!r}")
 
 
-def _code_image(artwork: Path, image_module):
-    """Return artwork as a Pillow image, rasterizing vector sources for ZXing."""
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Reject visible content outside the configured bleed plus safe-area inset."""
+    if spec.safe_area_mm == 0:
+        return
+    report.checks.append("safe-area")
+    try:
+        from PIL import Image
+
+        with _artwork_image(spec.artwork, Image) as image:
+            bounds = _visible_bounds(image)
+            width, height = image.size
+    except (ImportError, IndexError, OSError, RuntimeError, ValueError) as error:
+        report.add("SAFE_AREA_UNCHECKED", "error", f"Could not inspect artwork safe area: {error}")
+        return
+    if bounds is None:
+        return
+
+    left, top, right, bottom = bounds
+    total_width = spec.width_mm + 2 * spec.bleed_mm
+    total_height = spec.height_mm + 2 * spec.bleed_mm
+    inset = spec.bleed_mm + spec.safe_area_mm
+    minimum_x = math.ceil(width * inset / total_width)
+    minimum_y = math.ceil(height * inset / total_height)
+    maximum_x = width - 1 - minimum_x
+    maximum_y = height - 1 - minimum_y
+    report.metadata["safe_area_bounds_px"] = {
+        "content": {"left": left, "top": top, "right": right, "bottom": bottom},
+        "allowed": {"left": minimum_x, "top": minimum_y, "right": maximum_x, "bottom": maximum_y},
+    }
+    if left < minimum_x or top < minimum_y or right > maximum_x or bottom > maximum_y:
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            "Visible artwork content extends outside the configured bleed plus safe-area inset",
+        )
+
+
+def _visible_bounds(image) -> tuple[int, int, int, int] | None:
+    """Return non-canvas pixel bounds; reject artwork without a uniform canvas background."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    if width == 0 or height == 0:
+        raise ValueError("Artwork has no pixels to inspect")
+    corners = (
+        rgba.getpixel((0, 0)),
+        rgba.getpixel((width - 1, 0)),
+        rgba.getpixel((0, height - 1)),
+        rgba.getpixel((width - 1, height - 1)),
+    )
+    if len(set(corners)) != 1:
+        raise ValueError("Artwork corners do not establish a uniform canvas background")
+    canvas = corners[0]
+    visible = [
+        (index % width, index // width)
+        for index, pixel in enumerate(rgba.get_flattened_data())
+        if pixel != canvas
+    ]
+    if not visible:
+        return None
+    xs, ys = zip(*visible)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _artwork_image(artwork: Path, image_module):
+    """Return artwork as a Pillow image, rasterizing vector sources at 300 DPI."""
 
     if artwork.suffix.lower() == ".png":
         return image_module.open(artwork)
