@@ -467,6 +467,70 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
+def _linked_raster_svg(tmp_path, href: str, *, width_mm: int = 100) -> Path:
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width_mm}mm" height="{width_mm}mm" '
+            f'viewBox="0 0 {width_mm} {width_mm}">'
+            f'<image href="{href}" width="{width_mm}" height="{width_mm}"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    return artwork
+
+
+def _linked_raster_spec(artwork: Path, minimum_dpi: int = 300) -> LabelSpec:
+    return LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": minimum_dpi},
+        artwork.parent,
+    )
+
+
+def test_under_resolution_linked_svg_image_fails_closed(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    Image.new("RGB", (100, 100), "black").save(assets / "low-resolution.png")
+    artwork = _linked_raster_svg(tmp_path, "assets/low-resolution.png")
+
+    report = validate(_linked_raster_spec(artwork))
+
+    assert not report.passed
+    assert report.metadata["svg_embedded_images"][0]["source"] == "assets/low-resolution.png"
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+@pytest.mark.parametrize("href", ["missing.png", "../outside.png", "https://example.test/image.png"])
+def test_unavailable_or_unsafe_linked_svg_image_fails_closed(tmp_path, href):
+    artwork = _linked_raster_svg(tmp_path, href)
+
+    report = validate(_linked_raster_spec(artwork))
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_packaged_and_verified(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    Image.new("RGB", (1200, 1200), "black").save(assets / "print.png")
+    artwork = _linked_raster_svg(tmp_path, "assets/print.png")
+    spec = _linked_raster_spec(artwork)
+    report = validate(spec)
+    assert report.passed
+
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert manifest_data["linked_assets"]["assets/print.png"]["file"] == "assets/print.png"
+    assert (manifest.parent / "assets" / "print.png").is_file()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "assets" / "print.png").write_bytes(b"tampered")
+    failures = verify_package(manifest.parent)
+    assert "linked asset:assets/print.png checksum mismatch: assets/print.png" in failures
+    assert "linked asset:assets/print.png byte count mismatch: assets/print.png" in failures
+
+
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     value = "LABELOS-PDF-12345"
     barcode_path = Path(
