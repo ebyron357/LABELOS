@@ -46,6 +46,9 @@ from labelos.package import sha256_file
 from labelos.schemas.product import parse_product_record
 from labelos.security import resolve_under, sanitize_token
 
+# Only these formats are supported by the ExtendScript exporter.
+SUPPORTED_EXPORT_FORMATS: frozenset[str] = frozenset({"pdf", "ai", "png"})
+
 configure_logging(os.environ.get("LABELOS_LOG_LEVEL", "INFO"))
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "scripts" / "generate_label.jsx"
@@ -232,6 +235,25 @@ def create_bridge_app() -> FastAPI:
     async def generate(body: GenerateRequest) -> dict[str, Any]:
         with log_operation("illustrator.generate", dry_run=body.dry_run):
             record = parse_product_record(body.product_data)
+            if not body.export_formats:
+                raise LabelosException(
+                    "export_formats must not be empty",
+                    code="INVALID_EXPORT_FORMATS",
+                    category=INPUT_ERROR,
+                    http_status=400,
+                )
+            invalid_formats = [
+                export_format
+                for export_format in body.export_formats
+                if export_format not in SUPPORTED_EXPORT_FORMATS
+            ]
+            if invalid_formats:
+                raise LabelosException(
+                    f"Unsupported export format(s): {invalid_formats}. Supported: pdf, ai, png",
+                    code="INVALID_EXPORT_FORMATS",
+                    category=INPUT_ERROR,
+                    http_status=400,
+                )
             template_name = sanitize_token(Path(body.template_path).name, field="template")
             # Template may be provided as absolute under templates root or relative name.
             if Path(body.template_path).is_absolute():
@@ -332,6 +354,13 @@ def create_bridge_app() -> FastAPI:
             shutil.copy2(template, working_template)
             payload["templatePath"] = str(working_template)
             result = run_illustrator_job(payload)
+            if not result.get("outputs"):
+                raise LabelosException(
+                    "Illustrator reported success but returned zero outputs",
+                    code="NO_OUTPUTS",
+                    category=ARTWORK_GENERATION_ERROR,
+                    http_status=500,
+                )
             return {
                 "success": True,
                 "status": "ARTWORK_GENERATED",

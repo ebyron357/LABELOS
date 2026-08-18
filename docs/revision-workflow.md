@@ -48,5 +48,10 @@ validation report, approval, package, and timestamps.
 
 ## Approval binding
 
-Approval captures approver, timestamp, comments, and the **exact artwork SHA-256** being approved.
+`approve` is available only after `verify-package` has succeeded and transitioned the job
+to `AWAITING_APPROVAL`. Approval captures approver, timestamp, comments, and the
+**exact artwork SHA-256 from the generated package manifest**—not the checksum from the
+original input path. `release` requires that the saved verification checksum still matches
+the current package manifest and that the approval checksum still matches packaged artwork.
+
 Technical validation is not legal/regulatory approval.
