@@ -165,3 +165,24 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_malformed_pdf_returns_a_validation_error(tmp_path, capsys):
+    artwork = tmp_path / "malformed.pdf"
+    artwork.write_bytes(b"not a PDF")
+    config = tmp_path / "label.json"
+    config.write_text(
+        json.dumps({"artwork": artwork.name, "width_mm": 10, "height_mm": 10}), encoding="utf-8"
+    )
+
+    assert main(["validate", str(config), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert not report["passed"]
+    assert report["issues"] == [
+        {
+            "code": "PDF_INVALID",
+            "message": "PDF artwork could not be opened",
+            "path": str(artwork),
+            "severity": "error",
+        }
+    ]
