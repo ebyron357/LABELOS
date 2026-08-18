@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (local regular files under the SVG directory are DPI-checked, packaged, and checksummed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -41,7 +41,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Prompt-to-label generation | **FUTURE** |
 | Web UI / visual editing | **FUTURE** |
 | Brand libraries / SKU templates | **FUTURE** |
-| Approval workflows as a product | **FUTURE** |
+| Job approval/release integrity gates | **AVAILABLE NOW** (optional API workflow; release requires current successful package verification and approval bound to packaged artwork) |
 
 ## Operator path (use this)
 
@@ -89,20 +89,28 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-18 from branch `cursor/label-production-system-readiness-7464`
+after release-integrity and linked-SVG hardening:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 69 passed, 1 FastAPI dependency warning
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
 python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+python -m labelos.cli doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
+python -m labelos.cli validate examples/label.json --json          # PASS
+python -m labelos.cli validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING (exit 1)
+python -m labelos.cli package examples/label.json /tmp/labelos-release-integrity-e2e
+python -m labelos.cli verify-package /tmp/labelos-release-integrity-e2e  # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Next-run status
+
+Linked SVG raster dependencies are now fail-closed: remote, traversal, and symlink
+references fail validation; valid dependencies retain their relative paths in release
+packages and are validated against the manifest during `verify-package`. The remaining
+software limitation is required-copy verification for outlined or raster-only text,
+which needs an OCR design before it can be claimed as supported.

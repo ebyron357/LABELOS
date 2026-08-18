@@ -239,6 +239,68 @@ def test_svg_entity_cannot_satisfy_required_copy(tmp_path):
     assert "REQUIRED_COPY_MISSING" in codes
 
 
+def _linked_raster_svg(tmp_path: Path, href: str = "assets/photo.png") -> LabelSpec:
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    Image.new("RGB", (1200, 1200), "white").save(assets / "photo.png")
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+        f'<image href="{href}" x="0" y="0" width="10mm" height="10mm"/></svg>',
+        encoding="utf-8",
+    )
+    return LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+
+def test_linked_svg_raster_is_checked_and_packaged(tmp_path):
+    spec = _linked_raster_svg(tmp_path)
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"] == [{"index": 1, "source": "assets/photo.png"}]
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["linked_assets"]["assets/photo.png"]["file"] == "assets/photo.png"
+    assert (manifest.parent / "assets" / "photo.png").is_file()
+    assert not verify_package(manifest.parent)
+
+    linked_asset = manifest.parent / "assets" / "photo.png"
+    linked_asset.write_bytes(b"x" * linked_asset.stat().st_size)
+    assert verify_package(manifest.parent) == ["linked SVG asset checksum mismatch: assets/photo.png"]
+
+
+def test_linked_svg_raster_rejects_remote_and_symlink_references(tmp_path):
+    remote_root = tmp_path / "remote"
+    remote_root.mkdir()
+    remote_spec = _linked_raster_svg(remote_root, "https://example.test/photo.png")
+    remote_report = validate(remote_spec)
+    assert any(issue.code == "SVG_RASTER_IMAGE_INSPECTION_FAILED" for issue in remote_report.issues)
+
+    symlink_root = tmp_path / "symlink"
+    symlink_root.mkdir()
+    outside = tmp_path / "outside.png"
+    Image.new("RGB", (1200, 1200), "white").save(outside)
+    linked = symlink_root / "photo.png"
+    try:
+        linked.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+    artwork = symlink_root / "linked.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+        '<image href="photo.png" width="10mm" height="10mm"/></svg>',
+        encoding="utf-8",
+    )
+    symlink_spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, symlink_root
+    )
+    assert any(
+        issue.code == "SVG_RASTER_IMAGE_INSPECTION_FAILED" for issue in validate(symlink_spec).issues
+    )
+
+
 def test_malformed_pdf_fails_closed_without_crashing(tmp_path):
     artwork = tmp_path / "malformed.pdf"
     artwork.write_bytes(b"not a PDF")
