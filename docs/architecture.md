@@ -1,37 +1,36 @@
 # LABELOS Architecture
 
-## System roles
+## Canonical product (today)
 
-| Layer | Responsibility |
-| --- | --- |
-| **n8n Cloud** (`bwa357.app.n8n.cloud`) | Orchestration, approvals, notifications, routing, registry updates |
-| **LABELOS API** | Authenticated validation, packaging, verification, jobs, audit |
-| **Illustrator Automation Bridge** | Workstation agent driving Adobe Illustrator via ExtendScript/COM |
-| **Durable storage** (`LABELOS_STORAGE_PATH`) | Source, templates, generated, validation, approved, releases, archive |
-| **System of record** | Job JSON + identity index under `storage/jobs` (n8n Data Table `labelos_release_registry` may mirror releases) |
-
-## Production workflow
+LABELOS is a local **validation and release engine**. The supported operator path is the
+CLI: `validate` → `package` → `verify-package`, plus `doctor` for environment checks.
 
 ```text
-Product data
-  → Illustrator template (bridge)
-  → Artwork export
-  → LABELOS POST /validate
-  → Optional Callas preflight (adapter; disabled until licensed)
-  → Human approval (checksum-bound)
-  → LABELOS POST /package
-  → LABELOS POST /verify-package
-  → Production release
-  → Archive / audit trail
+Label spec JSON + artwork (SVG / PNG / PDF)
+  → labelos validate
+  → structured report (pass or fail-closed errors)
+  → labelos package   (refuses failed reports)
+  → labelos verify-package
+  → release directory (artwork + report + spec + SHA-256 manifest)
 ```
+
+Callas pdfToolbox is an optional commercial adapter. Until it is licensed and configured,
+validation records `preflight.status = SKIPPED_NOT_CONFIGURED` and never fakes a pass.
+
+## Optional / future layers (present in tree, not required)
+
+| Layer | Status |
+| --- | --- |
+| HTTP API (`labelos-api`) | FUTURE / optional automation |
+| Illustrator bridge | FUTURE; live COM needs a Windows workstation |
+| n8n workflow scaffold | FUTURE; cloud cutover not done |
+| Printer ICC / Callas profiles | EXTERNAL DEPENDENCY; not configured |
+
+Do not treat those layers as the production operator path.
 
 ## Fail-closed rules
 
-A release is blocked unless product data is valid, artwork generation succeeded (when required),
-LABELOS validation passed, package creation succeeded, package verification passed, required
-preflight passed when enabled, and human approval is bound to the artwork checksum.
-
-## Illustrator reality
-
-Adobe Illustrator is automated on a **controlled Windows workstation** using COM
-(`Illustrator.Application`) + ExtendScript. It is **not** treated as a headless cloud service.
+A release package is created only when validation has no error-severity issues.
+Verification fails if the manifest is malformed, files are missing or not regular files,
+paths escape the package directory, checksums or byte counts disagree, or the stored
+report does not record a pass.

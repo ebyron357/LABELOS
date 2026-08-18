@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "labelos"
 version = "0.2.0"
-description = "Production label artwork validation, packaging, and automation API"
+description = "Production label artwork validation and release packaging"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -55,3 +55,4 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+exclude = ["vendor", "production", "scripts"]

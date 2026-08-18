@@ -1,5 +1,9 @@
 # Security
 
+CLI package verification rejects path traversal, non-regular files, checksum mismatches,
+and non-passing reports. The notes below apply to the optional HTTP API/bridge.
+
+
 - Bearer auth via `LABELOS_API_TOKEN` / `LABELOS_BRIDGE_TOKEN`
 - Constant-time token compare (`secrets.compare_digest`)
 - No hardcoded credentials

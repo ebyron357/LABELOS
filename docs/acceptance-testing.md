@@ -1,5 +1,9 @@
 # Acceptance testing
 
+**Canonical operator acceptance** is the CLI workflow in the [README](../README.md)
+(`validate` → `package` → `verify-package`). The HTTP/n8n suite below is optional.
+
+
 Automated suite: `tests/test_acceptance_e2e.py`
 
 ```bash

@@ -1,5 +1,9 @@
 # Illustrator setup
 
+**Status: FUTURE.** Live Illustrator generation is not part of the operator validation path.
+A Windows workstation with licensed Illustrator is required before this bridge can be used.
+
+
 ## Supported automation architecture
 
 **Preferred / implemented:**

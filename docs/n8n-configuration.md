@@ -1,5 +1,8 @@
 # n8n configuration
 
+**Status: FUTURE.** n8n orchestration is not required to validate or release artwork today.
+
+
 ## Target workflow
 
 - Name: **LABELOS Label Validation & Release**

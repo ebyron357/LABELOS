@@ -295,7 +295,7 @@ def create_bridge_app() -> FastAPI:
                     (
                         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}mm" height="{height}mm" '
                         f'viewBox="0 0 {width} {height}">'
-                        f'<text x="4" y="12">{text}</text></svg>\n'
+                        f'<text x="12" y="20" font-size="4">{text}</text></svg>\n'
                     ),
                     encoding="utf-8",
                 )

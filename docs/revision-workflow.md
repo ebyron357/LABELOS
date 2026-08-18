@@ -1,5 +1,9 @@
 # Revision workflow
 
+**Status: FUTURE** for job-lifecycle orchestration. The operator release path today is
+validate → package → verify-package.
+
+
 ## Lifecycle
 
 ```text

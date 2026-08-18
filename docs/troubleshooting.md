@@ -2,13 +2,14 @@
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| API 401 | Missing/wrong Bearer token | Confirm `LABELOS_API_TOKEN` matches n8n credential |
-| `PATH_TRAVERSAL` | Destination outside storage | Keep paths under `LABELOS_STORAGE_PATH` |
-| `REJECTED_VALIDATION` | Artwork/spec mismatch | Inspect `result.failed` and `checks` |
-| `DUPLICATE_SKIPPED` | Same identity already processed | Use `RERUN` or `NEW_REVISION` |
-| `PACKAGE_VERIFICATION_FAILED` | Tamper or incomplete package | Re-package; never release |
-| `ILLUSTRATOR_UNAVAILABLE` | No COM / not Windows / Illustrator closed | Use workstation + open Illustrator or `dry_run` |
-| `PRODUCT_SCHEMA_INVALID` | Bad product JSON | Fix schema before generation |
-| Callas skipped | Not licensed | Expected until adapter configured |
-
-Structured logs include `job_id`, `sku`, `revision`, `operation`, `status`, `duration_ms`, `error_code`.
+| `ERROR: Configuration file does not exist` | Wrong path to JSON spec | Use a path relative to the current directory |
+| `ARTWORK_MISSING` | Artwork path in the spec is wrong | Paths are resolved relative to the spec file |
+| `DIMENSIONS_MISMATCH` | File size is not trim + bleed | Measure the file; include bleed in the artwork |
+| `DPI_TOO_LOW` / `PDF_IMAGE_DPI_TOO_LOW` / `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed raster is too small | Increase pixel dimensions or reduce placed size |
+| `SAFE_AREA_VIOLATION` | Live matter in the bleed/safe inset | Move type/codes inside trim minus `safe_area_mm` |
+| `REQUIRED_COPY_MISSING` | String not in SVG/PDF text | Match the exact characters; outlined type is not searchable |
+| `CODE_VALUE_MISMATCH` | QR/barcode decodes to something else | Check the expected value; UPC-A may decode as EAN-13 |
+| `PDF_INVALID` / `SVG_INVALID` / `PNG_INVALID` | Malformed file | Export a valid file; LABELOS fails closed instead of crashing |
+| `verify-package` checksum mismatch | File changed after packaging | Re-run `package` to a new directory; never edit a package |
+| Callas skipped | Not licensed | Expected. Do not treat as commercial preflight PASS |
+| API 401 | Future API token missing | Operators should use the CLI, not the API |

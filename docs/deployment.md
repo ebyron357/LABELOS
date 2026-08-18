@@ -1,5 +1,9 @@
 # Deployment
 
+**Status: FUTURE.** Operators use the local CLI today. This document describes an optional
+HTTP API deploy path that is not required for production artwork validation.
+
+
 ## Required environment
 
 | Variable | Required | Purpose |

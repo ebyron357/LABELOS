@@ -34,17 +34,29 @@ def _print_report(report: dict, as_json: bool) -> None:
 
 
 def _doctor() -> dict:
-    tools = {}
-    for name, module in (("PyMuPDF", "pymupdf"), ("ZXing-C++", "zxingcpp"), ("Callas pdfToolbox", None)):
-        if module is None:
-            tools[name] = {"available": False, "status": "optional commercial adapter not configured"}
-            continue
+    from .preflight import get_preflight_adapter
+
+    tools: dict[str, dict[str, str | bool]] = {}
+    required_ok = True
+    for name, module in (("Pillow", "PIL"), ("PyMuPDF", "pymupdf"), ("ZXing-C++", "zxingcpp")):
         try:
             __import__(module)
-            tools[name] = {"available": True, "status": "available"}
+            tools[name] = {"available": True, "required": True, "status": "available"}
         except ImportError:
-            tools[name] = {"available": False, "status": f"install Python module {module}"}
-    return {"passed": True, "tools": tools}
+            required_ok = False
+            tools[name] = {
+                "available": False,
+                "required": True,
+                "status": f"install Python module {module}",
+            }
+    preflight = get_preflight_adapter().run("", None)
+    tools["Callas pdfToolbox"] = {
+        "available": False,
+        "required": False,
+        "status": preflight.status,
+        "message": preflight.message,
+    }
+    return {"passed": required_ok, "tools": tools}
 
 
 def build_parser() -> argparse.ArgumentParser:

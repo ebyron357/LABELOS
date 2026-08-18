@@ -1,5 +1,10 @@
 # LABELOS HTTP API
 
+**Status: FUTURE / optional.** Production operators should use the CLI in the
+[README](../README.md). This API is an automation facade over the same validator;
+it is not required to validate or release artwork today.
+
+
 Base URL: `$LABELOS_API_BASE_URL`
 
 Auth: `Authorization: Bearer $LABELOS_API_TOKEN` on all routes except `/health`.

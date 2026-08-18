@@ -13,4 +13,6 @@ The schema lives at [`profiles/printer-profile.schema.example.json`](../profiles
 
 ## Status
 
-**PLACEHOLDER** until an approved printer specification document is supplied.
+**EXTERNAL DEPENDENCY / PLACEHOLDER** until an approved printer specification document
+is supplied. Callas pdfToolbox and equivalent commercial preflight tools are not
+configured. `labelos doctor` reports Callas as `SKIPPED_NOT_CONFIGURED`.
