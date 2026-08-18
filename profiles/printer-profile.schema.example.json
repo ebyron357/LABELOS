@@ -1,0 +1,22 @@
+{
+  "id": "printer-profile-placeholder",
+  "name": "Unapproved placeholder — do not enforce",
+  "vendor": null,
+  "source_document": null,
+  "approved": false,
+  "page_width_mm": null,
+  "page_height_mm": null,
+  "bleed_mm": null,
+  "safe_area_mm": null,
+  "color_space": null,
+  "icc_profile": null,
+  "pdf_standard": null,
+  "min_font_size_pt": null,
+  "min_line_weight_pt": null,
+  "black_construction": null,
+  "overprint_rules": null,
+  "barcode_requirements": null,
+  "ink_limit_percent": null,
+  "dieline_requirements": null,
+  "notes": "Populate only from an approved printer specification. Unapproved profiles are never enforced."
+}

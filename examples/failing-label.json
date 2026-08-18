@@ -4,6 +4,5 @@
   "height_mm": 50,
   "bleed_mm": 3,
   "safe_area_mm": 2,
-  "min_dpi": 300,
-  "required_copy": ["Example Product", "NET 250 g"]
+  "required_copy": ["This copy is not on the label"]
 }
