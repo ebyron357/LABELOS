@@ -1,5 +1,7 @@
 import hashlib
 import json
+import struct
+import zlib
 from base64 import b64encode
 from io import BytesIO
 from pathlib import Path
@@ -144,6 +146,97 @@ def test_malformed_svg_fails_structured(tmp_path):
     )
 
     assert any(issue.code == "SVG_INVALID" for issue in validate(spec).issues)
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
+
+
+def _png_header(width_px: int, height_px: int) -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width_px, height_px, 8, 2, 0, 0, 0))
+        + _png_chunk(b"pHYs", struct.pack(">IIB", 11811, 11811, 1))
+    )
+
+
+def test_corrupt_png_body_fails_closed(tmp_path):
+    """A valid PNG header must not certify artwork whose image data cannot decode."""
+    artwork = tmp_path / "corrupt-body.png"
+    artwork.write_bytes(
+        _png_header(1400, 760)
+        + _png_chunk(b"IDAT", b"not zlib compressed scanline data")
+        + _png_chunk(b"IEND", b"")
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "PNG_INVALID" for issue in report.issues)
+
+
+def test_truncated_png_fails_closed(tmp_path):
+    artwork = tmp_path / "truncated.png"
+    artwork.write_bytes(_png_header(1400, 760) + b"\x00\x00\x00\x20IDAT")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "PNG_INVALID" for issue in report.issues)
+
+
+def test_svg_doctype_declaration_is_rejected(tmp_path):
+    artwork = tmp_path / "doctype.svg"
+    artwork.write_text(
+        '<?xml version="1.0"?>\n'
+        '<!DOCTYPE svg [<!ENTITY a "aaaaaaaaaa">]>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+        '<text x="10" y="20">&a;</text></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["SVG_UNSAFE_XML"]
+
+
+def test_svg_entity_cannot_satisfy_required_copy(tmp_path):
+    """Required copy must come from label text, not from an XML entity declaration."""
+    artwork = tmp_path / "entity-copy.svg"
+    artwork.write_text(
+        '<?xml version="1.0"?>\n'
+        '<!DOCTYPE svg [<!ENTITY claim "CERTIFIED ORGANIC">]>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+        '<text x="10" y="20">&claim;</text></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "required_copy": ["CERTIFIED ORGANIC"],
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    codes = {issue.code for issue in report.issues}
+    assert "SVG_UNSAFE_XML" in codes
+    assert "REQUIRED_COPY_MISSING" in codes
 
 
 def test_malformed_pdf_fails_closed_without_crashing(tmp_path):

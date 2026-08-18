@@ -92,6 +92,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `ARTWORK_MISSING` | Artwork path does not exist |
 | `FORMAT_UNSUPPORTED` | Not SVG, PNG, or PDF |
 | `SVG_INVALID` / `PNG_INVALID` / `PDF_INVALID` | File is malformed; validation failed closed |
+| `SVG_UNSAFE_XML` | SVG declares a DOCTYPE/entity; flatten the file so copy is literal text |
+| `PNG_READER_UNAVAILABLE` | Pillow is missing, so PNG image data cannot be inspected |
 | `SVG_DIMENSIONS_MISSING` | SVG width/height must use mm, cm, in, or pt |
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |

@@ -14,7 +14,7 @@ they are **not** required to use LABELOS on production artwork today.
 | SVG artwork validation | **AVAILABLE NOW** |
 | PNG artwork validation | **AVAILABLE NOW** |
 | PDF artwork validation | **AVAILABLE NOW** |
-| Malformed artwork fail-closed (SVG/PNG/PDF) | **AVAILABLE NOW** |
+| Malformed artwork fail-closed (SVG/PNG/PDF) | **AVAILABLE NOW** (PNG image data is decoded, not just header-checked; SVG DOCTYPE/entity declarations are rejected) |
 | Physical dimensions (trim + bleed) | **AVAILABLE NOW** |
 | Trim/bleed expectations | **AVAILABLE NOW** |
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import re
 import struct
+import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
@@ -17,6 +18,7 @@ from .preflight import get_preflight_adapter
 MM_PER_POINT = 25.4 / 72
 MM_PER_CSS_PIXEL = 25.4 / 96
 SAFE_AREA_RENDER_DPI = 300
+_SVG_DOCTYPE_RE = re.compile(r"<!DOCTYPE|<!ENTITY", re.IGNORECASE)
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -49,12 +51,36 @@ def _validate_png(spec: LabelSpec, report: Report) -> str:
     if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
         report.add("PNG_INVALID", "error", "File is not a valid PNG")
         return ""
+    if not _png_image_data_is_readable(spec.artwork, report):
+        return ""
     width, height = struct.unpack(">II", data[16:24])
     dpi = _png_dpi(data)
     report.checks.extend(["format:png", "dimensions", "raster-resolution"])
     report.metadata["pixels"] = {"width": width, "height": height}
     _validate_pixel_dimensions(spec, width, height, dpi, report)
     return ""
+
+
+def _png_image_data_is_readable(artwork: Path, report: Report) -> bool:
+    """Decode the PNG body so a valid header cannot certify unreadable artwork."""
+
+    try:
+        from PIL import Image
+    except ImportError:
+        report.add("PNG_READER_UNAVAILABLE", "error", "Install Pillow to inspect PNG artwork")
+        return False
+    try:
+        with Image.open(artwork) as image:
+            if image.format != "PNG":
+                raise ValueError("file does not decode as PNG")
+            image.load()
+    except Image.DecompressionBombError as error:
+        report.add("PNG_INVALID", "error", f"PNG image data is unreasonably large: {error}")
+        return False
+    except (OSError, SyntaxError, ValueError, zlib.error) as error:
+        report.add("PNG_INVALID", "error", f"PNG image data could not be decoded: {error}")
+        return False
+    return True
 
 
 def _png_dpi(data: bytes) -> float | None:
@@ -91,6 +117,15 @@ def _validate_pixel_dimensions(
 
 def _validate_svg(spec: LabelSpec, report: Report) -> str:
     text = spec.artwork.read_text(encoding="utf-8", errors="replace")
+    if _SVG_DOCTYPE_RE.search(text):
+        # Entity-substituted content is not literal label text: it can silently satisfy
+        # required-copy checks and expand without bound. Reject before parsing.
+        report.add(
+            "SVG_UNSAFE_XML",
+            "error",
+            "SVG contains a DOCTYPE or entity declaration; flatten it before validation",
+        )
+        return ""
     try:
         root = ElementTree.fromstring(text)
     except ElementTree.ParseError as error:
@@ -356,7 +391,15 @@ def _validate_required_copy(spec: LabelSpec, text: str, report: Report) -> None:
 def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
     if not spec.safe_area_mm:
         return
-    if any(issue.code in {"SVG_INVALID", "PNG_INVALID", "PDF_INVALID", "PDF_PAGE_COUNT"} for issue in report.issues):
+    blocking = {
+        "SVG_INVALID",
+        "SVG_UNSAFE_XML",
+        "PNG_INVALID",
+        "PNG_READER_UNAVAILABLE",
+        "PDF_INVALID",
+        "PDF_PAGE_COUNT",
+    }
+    if any(issue.code in blocking for issue in report.issues):
         return
     report.checks.append("safe-area")
     suffix = spec.artwork.suffix.lower()
