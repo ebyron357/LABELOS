@@ -31,10 +31,10 @@
 
 ## Verification record
 
-Verified on 2026-08-18 from commit `PENDING_COMMIT`:
+Verified on 2026-08-18 from commit `d0674f9`:
 
 ```text
-python3 -m pytest -q                      # 13 passed
+python3 -m pytest -q                      # 14 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m build --outdir /tmp/labelos-build
@@ -44,7 +44,7 @@ python3 -m labelos.cli verify-package /tmp/labelos-e2e --json          # passed
 python3 -m labelos.cli doctor --json                                  # passed
 ```
 
-Results: 13 tests passed; Ruff and compile checks passed; the sdist and wheel were generated
+Results: 14 tests passed; Ruff and compile checks passed; the sdist and wheel were generated
 in `/tmp/labelos-build`; and the end-to-end package was created and manifest-verified at
 `/tmp/labelos-e2e`.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
