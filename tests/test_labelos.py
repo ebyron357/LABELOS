@@ -52,6 +52,84 @@ def test_dimension_mismatch_fails():
     assert any(issue.code == "DIMENSIONS_MISMATCH" for issue in validate(spec).issues)
 
 
+def test_svg_safe_area_accepts_content_inside_trim(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">'
+            '<rect width="106" height="56" fill="#fff"/>'
+            '<rect x="5" y="5" width="96" height="46" fill="#000"/>'
+            "</svg>"
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert "safe-area" in report.checks
+    assert report.metadata["safe_area_mm"] == {"left": 5.0, "top": 5.0, "right": 101.0, "bottom": 51.0}
+
+
+def test_svg_safe_area_rejects_critical_content_in_bleed(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm" viewBox="0 0 106 56">'
+            '<rect width="106" height="56" fill="#fff"/>'
+            '<rect x="4" y="5" width="10" height="10" fill="#000"/>'
+            "</svg>"
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["SAFE_AREA_VIOLATION"]
+
+
+def test_png_safe_area_fails_closed_when_content_cannot_be_separated(tmp_path):
+    artwork = tmp_path / "label.png"
+    qrcode.make("safe area").save(artwork)
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 1, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_UNVERIFIABLE" for issue in report.issues)
+
+
+def test_pdf_safe_area_rejects_vector_in_bleed(tmp_path):
+    artwork = tmp_path / "unsafe.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=106 / (25.4 / 72), height=56 / (25.4 / 72))
+    page.draw_rect(pymupdf.Rect(0, 0, page.rect.width, page.rect.height), color=None, fill=(1, 1, 1))
+    page.draw_rect(pymupdf.Rect(4 / (25.4 / 72), 5 / (25.4 / 72), 20, 30), color=(0, 0, 0))
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3, "safe_area_mm": 2},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in report.issues)
+
+
 def test_package_contains_verified_manifest(tmp_path):
     spec = passing_spec()
     report = validate(spec)
@@ -59,7 +137,23 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+
+
+def test_package_verification_rejects_unexpected_files_and_unsafe_manifest(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    package = manifest.parent
+    (package / "notes.txt").write_text("not part of release", encoding="utf-8")
+    failures = verify_package(package)
+    assert failures == ["unexpected package file: notes.txt"]
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artwork"]["file"] = "../outside.svg"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    failures = verify_package(package)
+    assert "manifest artwork file must be a single filename" in failures
 
 
 def test_cli_validate_and_package(tmp_path, capsys):

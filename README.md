@@ -39,10 +39,13 @@ code was checked.
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  configured safe-area bounds, required copy, and configured barcode/QR values. PNG artwork
+  with a non-zero safe area fails closed because a flattened raster cannot distinguish
+  critical content from its background.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
   report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+- `labelos verify-package DESTINATION`: verifies package schema, SHA-256 checksums, byte
+  counts, expected filenames, and rejects unexpected files, subdirectories, and symlinks.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 

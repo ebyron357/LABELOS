@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import struct
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
@@ -32,6 +33,7 @@ def validate(spec: LabelSpec) -> Report:
     text = validator(spec, report)
     _validate_required_copy(spec, text, report)
     _validate_codes(spec, report)
+    _validate_safe_area(spec, report)
     report.metadata["spec"] = {
         "width_mm": spec.width_mm,
         "height_mm": spec.height_mm,
@@ -133,6 +135,161 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         return text
     finally:
         document.close()
+
+
+def _validate_safe_area(spec: LabelSpec, report: Report) -> None:
+    """Ensure detectable artwork stays inside the configured safe area.
+
+    The physical artwork includes bleed, so the safe area begins after both the
+    bleed and the configured inset.  A raster image has no separable content
+    objects; it therefore cannot prove a safe area and fails closed when one is
+    requested.
+    """
+
+    if not spec.safe_area_mm:
+        return
+    report.checks.append("safe-area")
+    outer_width = spec.width_mm + 2 * spec.bleed_mm
+    outer_height = spec.height_mm + 2 * spec.bleed_mm
+    inset = spec.bleed_mm + spec.safe_area_mm
+    bounds = (inset, inset, outer_width - inset, outer_height - inset)
+    report.metadata["safe_area_mm"] = {
+        "left": round(bounds[0], 3),
+        "top": round(bounds[1], 3),
+        "right": round(bounds[2], 3),
+        "bottom": round(bounds[3], 3),
+    }
+    suffix = spec.artwork.suffix.lower()
+    if suffix == ".png":
+        report.add(
+            "SAFE_AREA_UNVERIFIABLE",
+            "error",
+            "Cannot distinguish critical content from the background of a raster PNG",
+        )
+        return
+    if suffix == ".svg":
+        _validate_svg_safe_area(spec.artwork, outer_width, outer_height, bounds, report)
+    elif suffix == ".pdf":
+        _validate_pdf_safe_area(spec.artwork, outer_width, outer_height, bounds, report)
+
+
+def _validate_svg_safe_area(
+    artwork: Path, outer_width: float, outer_height: float, safe: tuple[float, float, float, float], report: Report
+) -> None:
+    text = artwork.read_text(encoding="utf-8", errors="replace")
+    if re.search(r"<!DOCTYPE|<!ENTITY", text, re.IGNORECASE):
+        report.add("SVG_UNSAFE_XML", "error", "SVG contains a DOCTYPE or entity declaration")
+        return
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return  # SVG syntax has already been reported by the format validator.
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1].lower()
+        if tag in {"svg", "defs", "title", "desc", "metadata", "style"}:
+            continue
+        if element.get("transform"):
+            report.add(
+                "SAFE_AREA_UNVERIFIABLE",
+                "error",
+                f"Cannot validate transformed SVG {tag} element against the safe area",
+            )
+            continue
+        box = _svg_element_box(element, tag)
+        if box is None:
+            report.add(
+                "SAFE_AREA_UNVERIFIABLE",
+                "error",
+                f"Cannot determine bounds for SVG {tag} element",
+            )
+            continue
+        if _is_full_canvas_background(box, outer_width, outer_height):
+            continue
+        _check_safe_bounds(box, safe, report, f"SVG {tag}")
+
+
+def _svg_element_box(element: ET.Element, tag: str) -> tuple[float, float, float, float] | None:
+    def number(name: str, default: float | None = None) -> float | None:
+        value = element.get(name)
+        if value is None:
+            return default
+        match = re.fullmatch(r"\s*([+-]?[0-9.]+)\s*", value)
+        return float(match.group(1)) if match else None
+
+    if tag in {"rect", "image", "foreignobject"}:
+        x, y = number("x", 0), number("y", 0)
+        width, height = number("width"), number("height")
+        if None in {x, y, width, height}:
+            return None
+        return x, y, x + width, y + height
+    if tag == "circle":
+        cx, cy, radius = number("cx", 0), number("cy", 0), number("r")
+        if None in {cx, cy, radius}:
+            return None
+        return cx - radius, cy - radius, cx + radius, cy + radius
+    if tag == "ellipse":
+        cx, cy, rx, ry = number("cx", 0), number("cy", 0), number("rx"), number("ry")
+        if None in {cx, cy, rx, ry}:
+            return None
+        return cx - rx, cy - ry, cx + rx, cy + ry
+    if tag in {"line", "polyline", "polygon", "path", "use", "text", "tspan"}:
+        # Font and path geometry need a renderer to calculate reliably. A text
+        # insertion point is still a useful fail-closed lower bound.
+        if tag in {"text", "tspan"}:
+            x, y = number("x"), number("y")
+            return (x, y, x, y) if x is not None and y is not None else None
+        return None
+    return None
+
+
+def _validate_pdf_safe_area(
+    artwork: Path, outer_width: float, outer_height: float, safe: tuple[float, float, float, float], report: Report
+) -> None:
+    try:
+        import pymupdf
+    except ImportError:
+        # _validate_pdf has already issued the actionable reader error.
+        return
+
+    document = pymupdf.open(artwork)
+    try:
+        if document.page_count != 1:
+            return
+        page = document[0]
+        page_bounds = (page.rect.width * MM_PER_POINT, page.rect.height * MM_PER_POINT)
+        for block in page.get_text("blocks"):
+            _check_safe_bounds(_rect_mm(block[:4]), safe, report, "PDF text")
+        for image in page.get_images(full=True):
+            for rect in page.get_image_rects(image[0]):
+                _check_safe_bounds(_rect_mm(rect), safe, report, "PDF image")
+        for drawing in page.get_drawings():
+            box = _rect_mm(drawing["rect"])
+            if not _is_full_canvas_background(box, *page_bounds):
+                _check_safe_bounds(box, safe, report, "PDF vector")
+    finally:
+        document.close()
+
+
+def _rect_mm(rect) -> tuple[float, float, float, float]:
+    return tuple(float(value) * MM_PER_POINT for value in rect)
+
+
+def _is_full_canvas_background(box: tuple[float, float, float, float], width: float, height: float) -> bool:
+    return box[0] <= 0.1 and box[1] <= 0.1 and box[2] >= width - 0.1 and box[3] >= height - 0.1
+
+
+def _check_safe_bounds(
+    box: tuple[float, float, float, float],
+    safe: tuple[float, float, float, float],
+    report: Report,
+    object_name: str,
+) -> None:
+    if box[0] < safe[0] - 0.1 or box[1] < safe[1] - 0.1 or box[2] > safe[2] + 0.1 or box[3] > safe[3] + 0.1:
+        report.add(
+            "SAFE_AREA_VIOLATION",
+            "error",
+            f"{object_name} bounds {box[0]:.2f},{box[1]:.2f}–{box[2]:.2f},{box[3]:.2f} mm exceed safe area",
+        )
 
 
 def _validate_physical_size(spec: LabelSpec, width: float, height: float, report: Report) -> None:
