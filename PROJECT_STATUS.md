@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (local regular files under the SVG directory are DPI-checked, packaged, and checksummed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -56,14 +56,11 @@ labelos verify-package storage/demo-release
 ## Known real blockers
 
 1. **Callas / pdfToolbox is unavailable.** LABELOS will not claim commercial preflight PASS.
-2. **Linked SVG raster files are partial.** Only embedded data-URI rasters are checked today;
-   external `href` files must be validated and packaged fail-closed before they can be treated
-   as a fully supported production input.
-3. **Required copy is text-extraction based.** Outlined type and rasterized copy are not found.
-4. **Safe-area uses rendered occupancy against white.** Full-bleed colored backgrounds can
+2. **Required copy is text-extraction based.** Outlined type and rasterized copy are not found.
+3. **Safe-area uses rendered occupancy against white.** Full-bleed colored backgrounds can
    be reported as safe-area violations; keep live matter inside the inset.
-5. **No approved printer profile is loaded.** Do not invent printer-specific limits.
-6. **Live Illustrator generation is blocked** without a licensed workstation and template.
+4. **No approved printer profile is loaded.** Do not invent printer-specific limits.
+5. **Live Illustrator generation is blocked** without a licensed workstation and template.
 
 ## Future roadmap (documented, not built in this pass)
 
@@ -93,10 +90,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 ## Verification record
 
 Verified on 2026-08-18 from branch `cursor/label-production-system-readiness-7464`
-after closing the release-integrity gate:
+after release-integrity and linked-SVG hardening:
 
 ```text
-python -m pytest -q                      # 67 passed, 1 FastAPI dependency warning
+python -m pytest -q                      # see current run verification
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -110,9 +107,10 @@ python -m labelos.cli verify-package /tmp/labelos-release-integrity-e2e  # PASS
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
 
-## Next autonomous task
+## Next-run status
 
-Validate and package local linked SVG raster assets fail-closed. The current SVG validator
-checks embedded data-URI rasters but skips external `<image href="...">` files, so this is the
-highest remaining actionable production-input gap. Keep Callas, printer-profile approval, and
-live Illustrator workstation work marked as external/human blockers.
+Linked SVG raster dependencies are now fail-closed: remote, traversal, and symlink
+references fail validation; valid dependencies retain their relative paths in release
+packages and are validated against the manifest during `verify-package`. The remaining
+software limitation is required-copy verification for outlined or raster-only text,
+which needs an OCR design before it can be claimed as supported.
