@@ -2,16 +2,17 @@
 
 ## Implemented
 
-- JSON label specification validation with physical dimensions, bleed, safe-area sanity,
-  minimum DPI, and required-copy fields.
+- JSON label specification validation with physical dimensions, bleed, rendered safe-area
+  enforcement, minimum DPI, and required-copy fields.
 - SVG, PNG, and PDF artwork validation through bundled PyMuPDF, including effective-DPI
   enforcement for every raster image embedded in a PDF.
 - QR/barcode expected-value validation through bundled ZXing-C++; SVG and PDF artwork are
   rasterized at 300 DPI before decoding, and a decoder load failure is a validation error
   whenever code validation is requested.
 - Operator CLI: validate, package, verify-package, and doctor.
-- Immutable-style release directories containing copied artwork, validation report, manifest,
-  and SHA-256 checksums.
+- Immutable-style release directories containing copied artwork, validation report, normalized
+  label spec, manifest, and SHA-256 checksums. Verification rejects path traversal, symlinks,
+  size/checksum mismatches, and non-passing or inconsistent package metadata.
 - Passing and failing fixture coverage plus CLI/package regression tests.
 
 ## Known external/human blockers
@@ -30,34 +31,35 @@
 
 ## Verification record
 
-Verified on 2026-08-17 from the current production-readiness change set:
+Verified on 2026-08-18 from code commit `bac1f84`:
 
 ```text
-python3 -m pytest -q                      # 11 passed
+python3 -m pytest -q                      # 24 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-production-build-pdf-dpi
+python3 -m build --outdir /tmp/labelos-production-build-d194
                                          # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-pdf-dpi-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-pdf-dpi-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-source-package-d194 --json
+python3 -m labelos.cli verify-package /tmp/labelos-source-package-d194 --json
 python3 -m labelos.cli doctor --json
-python3 -m pip install --no-deps --target /tmp/labelos-wheel-target-pdf-dpi \
-  /tmp/labelos-production-build-pdf-dpi/labelos-0.1.0-py3-none-any.whl
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli validate \
+python3 -m pip install --no-deps --target /tmp/labelos-wheel-target-d194 \
+  /tmp/labelos-production-build-d194/labelos-0.1.0-py3-none-any.whl
+PYTHONPATH=/tmp/labelos-wheel-target-d194 python3 -m labelos.cli validate \
   examples/label.json --json
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli package \
-  examples/label.json /tmp/labelos-wheel-package-pdf-dpi --json
-PYTHONPATH=/tmp/labelos-wheel-target-pdf-dpi python3 -m labelos.cli verify-package \
-  /tmp/labelos-wheel-package-pdf-dpi --json
+PYTHONPATH=/tmp/labelos-wheel-target-d194 python3 -m labelos.cli package \
+  examples/label.json /tmp/labelos-wheel-package-d194 --json
+PYTHONPATH=/tmp/labelos-wheel-target-d194 python3 -m labelos.cli verify-package \
+  /tmp/labelos-wheel-package-d194 --json
 ```
 
-Results: 11 tests passed; Ruff, bytecode compilation, and dependency consistency checks
-passed; the sdist and wheel were created in `/tmp/labelos-production-build-pdf-dpi`; and
-source and isolated-wheel CLI packages were created and checksum-verified.
+Results: 24 tests passed; Ruff, bytecode compilation, and dependency consistency checks
+passed; the sdist and wheel were created in `/tmp/labelos-production-build-d194`; and source
+and isolated-wheel CLI packages were created and checksum-verified.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
-decoded expected values. PDF raster-image DPI regression coverage includes both a rejected
-72-DPI image and an accepted 600-DPI image. GitHub Actions runs tests, lint, and builds on
-Python 3.10 and 3.12.
+decoded expected values. Regression coverage includes safe-area boundaries, malformed artwork,
+release package tampering, PDF raster-image DPI (rejected 72-DPI and accepted 600-DPI images),
+and source/wheel CLI packaging. GitHub Actions runs tests, lint, and builds on Python 3.10 and
+3.12.

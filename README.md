@@ -30,21 +30,24 @@ The configuration is JSON:
 }
 ```
 
-Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. SVG, PNG,
-and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed with
-LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. Every raster image embedded
-in a PDF is checked at its placed (effective) resolution against `min_dpi`; a low-resolution
-image fails validation even when the PDF page dimensions are correct. If `barcode_value` or
-`qr_value` is configured but the decoder cannot load, validation fails rather than asserting a
-code was checked.
+Artwork dimensions include bleed: the example above expects a 106 × 56 mm asset. `safe_area_mm`
+is measured inward from the trim edge; visible artwork outside that boundary fails validation.
+SVG, PNG, and PDF artwork are accepted. PDF inspection and QR/barcode decoding are installed
+with LABELOS; SVG and PDF are rendered at 300 DPI before code decoding. Every raster image
+embedded in a PDF is checked at its placed (effective) resolution against `min_dpi`; a
+low-resolution image fails validation even when the PDF page dimensions are correct. If
+`barcode_value` or `qr_value` is configured but the decoder cannot load, validation fails rather
+than asserting a code was checked.
 
 ## Commands
 
-- `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+- `labelos validate CONFIG [--json]`: validate format, dimensions, safe area, raster
+  resolution, required copy, and configured barcode/QR values.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+  report, the normalized label spec, and a SHA-256 manifest. Existing package destinations are
+  never overwritten.
+- `labelos verify-package DESTINATION`: verifies checksums, sizes, regular-file-only package
+  entries, the passing validation report, and package/spec consistency.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
