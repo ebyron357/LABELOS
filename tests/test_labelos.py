@@ -176,7 +176,7 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     artwork = tmp_path / "barcode.pdf"
     document = pymupdf.open()
     page = document.new_page(width=100 / (25.4 / 72), height=100 / (25.4 / 72))
-    page.insert_image(pymupdf.Rect(25, 50, 250, 150), filename=barcode_path)
+    page.insert_image(pymupdf.Rect(25, 50, 150, 83), filename=barcode_path)
     document.save(artwork)
     document.close()
     spec = LabelSpec.from_dict(
