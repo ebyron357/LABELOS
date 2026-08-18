@@ -39,10 +39,13 @@ code was checked.
 ## Commands
 
 - `labelos validate CONFIG [--json]`: validate format, dimensions, raster resolution,
-  required copy, and configured barcode/QR values.
+  PDF embedded-image resolution, required copy, configured barcode/QR values, and safe-area
+  bounds for SVG/PDF artwork.
 - `labelos package CONFIG DESTINATION`: validates, then writes artwork, a JSON validation
-  report, and a SHA-256 manifest. Existing package destinations are never overwritten.
-- `labelos verify-package DESTINATION`: verifies package checksums.
+  report, a portable label specification, and a SHA-256 manifest. Existing package destinations
+  are never overwritten.
+- `labelos verify-package DESTINATION`: verifies package checksums, byte counts, manifest
+  structure, regular-file paths, and agreement between the report, specification, and artwork.
 - `labelos doctor`: reports optional validator availability. Callas pdfToolbox is explicitly
   reported as unavailable until a real adapter and licensed profile are configured.
 
@@ -52,3 +55,7 @@ The core validator provides reproducible local checks and package integrity. Com
 prepress profiles, approved regulatory copy, brand artwork, printer-specific color targets,
 and a Callas adapter are not present in this repository; they must be supplied and approved
 by the appropriate owner before a particular label can be certified for print.
+
+Safe-area validation is deliberately conservative. It rasterizes SVG/PDF artwork and rejects
+visible non-white content outside the configured trim-safe region. PNG safe areas fail closed,
+because a flattened raster cannot reliably distinguish critical content from its background.

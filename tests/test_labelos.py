@@ -7,6 +7,7 @@ import barcode
 import pymupdf
 import qrcode
 from barcode.writer import ImageWriter
+from PIL import Image
 
 from labelos.cli import main
 from labelos.models import LabelSpec
@@ -59,7 +60,57 @@ def test_package_contains_verified_manifest(tmp_path):
     assert manifest.is_file()
     assert not verify_package(manifest.parent)
     (manifest.parent / "passing-label.svg").write_text("tampered", encoding="utf-8")
-    assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
+    failures = verify_package(manifest.parent)
+    assert "artwork checksum mismatch: passing-label.svg" in failures
+    assert "artwork byte count mismatch: passing-label.svg" in failures
+
+
+def test_safe_area_accepts_content_inside_trim(tmp_path):
+    artwork = tmp_path / "safe.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="30mm" height="30mm" viewBox="0 0 30 30">'
+        '<rect width="30" height="30" fill="white"/><rect x="8" y="8" width="10" height="10"/></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 30, "height_mm": 30, "safe_area_mm": 5}, tmp_path
+    )
+    report = validate(spec)
+    assert report.passed
+    assert "safe-area" in report.checks
+
+
+def test_safe_area_rejects_content_near_edge(tmp_path):
+    artwork = tmp_path / "unsafe.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="30mm" height="30mm" viewBox="0 0 30 30">'
+        '<rect width="30" height="30" fill="white"/><rect x="2" y="8" width="10" height="10"/></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 30, "height_mm": 30, "safe_area_mm": 5}, tmp_path
+    )
+    assert any(issue.code == "SAFE_AREA_VIOLATION" for issue in validate(spec).issues)
+
+
+def test_safe_area_fails_closed_for_raster_artwork(tmp_path):
+    image = qrcode.make("https://example.test/safe-area")
+    artwork = tmp_path / "safe-area.png"
+    image.save(artwork)
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 1, "safe_area_mm": 2},
+        tmp_path,
+    )
+    assert any(issue.code == "SAFE_AREA_UNCHECKABLE" for issue in validate(spec).issues)
+
+
+def test_package_verification_rejects_traversal_manifest_path(tmp_path):
+    spec = passing_spec()
+    manifest_path = create_package(spec, validate(spec), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artwork"]["file"] = "../outside.svg"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert "artwork file path is invalid" in verify_package(manifest_path.parent)
 
 
 def test_cli_validate_and_package(tmp_path, capsys):
@@ -158,10 +209,34 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     document.save(artwork)
     document.close()
     spec = LabelSpec.from_dict(
-        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "barcode_value": value}, tmp_path
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 100,
+            "min_dpi": 1,
+            "barcode_value": value,
+        },
+        tmp_path,
     )
 
     report = validate(spec)
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_pdf_embedded_image_resolution_is_enforced(tmp_path):
+    image_path = tmp_path / "low-resolution.png"
+    Image.new("RGB", (50, 50), "black").save(image_path)
+    artwork = tmp_path / "low-resolution.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=72, height=72)
+    page.insert_image(pymupdf.Rect(0, 0, 72, 72), filename=image_path)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+    report = validate(spec)
+    assert report.metadata["pdf"]["embedded_image_dpi"] == [50.0]
+    assert any(issue.code == "PDF_IMAGE_DPI_TOO_LOW" for issue in report.issues)
