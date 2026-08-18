@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (local regular files under the SVG directory are DPI-checked, packaged, and checksummed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,10 +89,11 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-18 from branch `cursor/label-production-system-readiness-1d85`
+at implementation commit `0ffd508`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 58 passed (1 FastAPI deprecation warning)
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -106,3 +107,11 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Next-run status
+
+Linked SVG raster dependencies are now fail-closed: remote, traversal, and symlink
+references fail validation; valid dependencies retain their relative paths in release
+packages and are validated against the manifest during `verify-package`. The remaining
+software limitation is required-copy verification for outlined or raster-only text,
+which needs an OCR design before it can be claimed as supported.
