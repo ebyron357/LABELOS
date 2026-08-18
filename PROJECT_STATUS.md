@@ -36,32 +36,31 @@
 
 ## Verification record
 
-Verified on 2026-08-18 from commit `0a03677` plus the uncommitted malformed-artwork
-hardening documented here:
+Verified on 2026-08-18 from commit `0fe102d233040c7b7d0d03bff2e5b40cd579fd8d`:
 
 ```text
 python3 -m pytest -q                      # 19 passed
 python3 -m ruff check .                   # passed
 python3 -m compileall -q labelos tests    # passed
 python3 -m pip check                      # passed
-python3 -m build --outdir /tmp/labelos-production-build-36Lxle
+python3 -m build --outdir /tmp/labelos-final-build-cCiRSZ
                                          # sdist and wheel created
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-production-package-J0RVJZ --json
-python3 -m labelos.cli verify-package /tmp/labelos-production-package-J0RVJZ --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-final-package-mXIeoC --json
+python3 -m labelos.cli verify-package /tmp/labelos-final-package-mXIeoC --json
 python3 -m labelos.cli doctor --json
-python3 -m pip install --no-deps --target /tmp/labelos-wheel-target-qY6Vtb \
-  /tmp/labelos-production-build-36Lxle/labelos-0.1.0-py3-none-any.whl
-PYTHONPATH=/tmp/labelos-wheel-target-qY6Vtb python3 -m labelos.cli validate \
+python3 -m pip install --no-deps --target /tmp/labelos-final-wheel-target-hiW5qk \
+  /tmp/labelos-final-build-cCiRSZ/labelos-0.1.0-py3-none-any.whl
+PYTHONPATH=/tmp/labelos-final-wheel-target-hiW5qk python3 -m labelos.cli validate \
   examples/label.json --json
-PYTHONPATH=/tmp/labelos-wheel-target-qY6Vtb python3 -m labelos.cli package \
-  examples/label.json /tmp/labelos-wheel-package-O1KGQG --json
-PYTHONPATH=/tmp/labelos-wheel-target-qY6Vtb python3 -m labelos.cli verify-package \
-  /tmp/labelos-wheel-package-O1KGQG --json
+PYTHONPATH=/tmp/labelos-final-wheel-target-hiW5qk python3 -m labelos.cli package \
+  examples/label.json /tmp/labelos-final-wheel-package-vPKzqn --json
+PYTHONPATH=/tmp/labelos-final-wheel-target-hiW5qk python3 -m labelos.cli verify-package \
+  /tmp/labelos-final-wheel-package-vPKzqn --json
 ```
 
 Results: 19 tests passed; Ruff, bytecode compilation, and dependency consistency checks
-passed; the sdist and wheel were created in `/tmp/labelos-production-build-36Lxle`; and source
+passed; the sdist and wheel were created in `/tmp/labelos-final-build-cCiRSZ`; and source
 and isolated-wheel CLI packages were created and checksum-verified. Regression fixtures cover
 malformed PDF through the operator CLI, truncated PNG, malformed SVG, safe-area violations, and
 PDF raster-image DPI failures.
