@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,22 +46,39 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
 
 def verify_package(destination: Path) -> list[str]:
     """Return integrity failures for a release package."""
+    destination = destination.resolve()
     manifest_path = destination / "manifest.json"
     if not manifest_path.is_file():
         return ["manifest.json is missing"]
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         return [f"manifest.json is invalid JSON: {error}"]
+    if not isinstance(manifest, dict):
+        return ["manifest.json must contain a JSON object"]
+    if manifest.get("schema_version") != 1:
+        return ["manifest.json has an unsupported schema version"]
     failures = []
     for key in ("artwork", "validation_report"):
-        entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
-        if not path.is_file():
-            failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
-            failures.append(f"{key} checksum mismatch: {path.name}")
+        failures.extend(_verify_entry(destination, key, manifest.get(key)))
     return failures
+
+
+def _verify_entry(destination: Path, key: str, entry: object) -> list[str]:
+    if not isinstance(entry, dict):
+        return [f"{key} manifest entry is invalid"]
+    filename = entry.get("file")
+    if not isinstance(filename, str) or not filename or Path(filename).name != filename:
+        return [f"{key} file path is invalid"]
+    expected_hash = entry.get("sha256")
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        return [f"{key} checksum is invalid"]
+    path = destination / filename
+    if path.is_symlink() or not path.is_file():
+        return [f"{key} file is missing: {filename}"]
+    if expected_hash != _sha256(path):
+        return [f"{key} checksum mismatch: {filename}"]
+    return []
 
 
 def _sha256(path: Path) -> str:
