@@ -29,20 +29,24 @@
 
 ## Verification record
 
-Verified on 2026-08-09 from commit `0fbe2c760154c772e2eb424971b882ce52919874`:
+Verified on 2026-08-18 from commit `513f5ffb449e707afdf935956c21944dcc7459fb`:
 
 ```text
-python3 -m pytest                         # 9 passed
+python3 -m pytest -q                      # 10 passed
 python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos tests    # passed
+python3 -m pip check                      # passed
 python3 -m build                          # sdist and wheel created in dist/
 python3 -m labelos.cli validate examples/label.json --json
-python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e --json
-python3 -m labelos.cli verify-package /tmp/labelos-e2e --json
+python3 -m labelos.cli package examples/label.json /tmp/labelos-package-20260818 --json
+python3 -m labelos.cli verify-package /tmp/labelos-package-20260818 --json
 python3 -m labelos.cli doctor --json
 ```
 
-Results: 9 tests passed; Ruff passed; the sdist and wheel were generated in `dist/`; and the
-end-to-end package was created and checksum-verified at `/tmp/labelos-e2e`.
+Results: 10 tests passed; Ruff, bytecode compilation, and installed-dependency consistency
+checks passed; the sdist and wheel were generated in `dist/`; and the end-to-end package was
+created and checksum-verified at `/tmp/labelos-package-20260818`. A direct malformed-PDF CLI
+check returned structured `PDF_INVALID` JSON and exit code 1, without a traceback.
 `doctor` confirmed PyMuPDF and ZXing-C++ are available; Callas pdfToolbox remains unavailable.
 QR and Code 128 regression tests generate raster, SVG, and PDF fixtures and verify their
 decoded expected values. GitHub Actions runs tests, lint, and builds on Python 3.10 and 3.12.
