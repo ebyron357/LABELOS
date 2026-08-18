@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,7 @@ def create_package(spec: LabelSpec, report: Report, destination: Path) -> Path:
 
 def verify_package(destination: Path) -> list[str]:
     """Return integrity failures for a release package."""
+    destination = destination.resolve()
     manifest_path = destination / "manifest.json"
     if not manifest_path.is_file():
         return ["manifest.json is missing"]
@@ -52,15 +54,42 @@ def verify_package(destination: Path) -> list[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return [f"manifest.json is invalid JSON: {error}"]
+    if not isinstance(manifest, dict):
+        return ["manifest.json must contain a JSON object"]
     failures = []
+    if manifest.get("schema_version") != 1:
+        failures.append("manifest schema_version must be 1")
     for key in ("artwork", "validation_report"):
         entry = manifest.get(key, {})
-        path = destination / str(entry.get("file", ""))
-        if not path.is_file():
-            failures.append(f"{key} file is missing: {path.name}")
-        elif entry.get("sha256") != _sha256(path):
-            failures.append(f"{key} checksum mismatch: {path.name}")
+        if not isinstance(entry, dict):
+            failures.append(f"{key} manifest entry must be an object")
+            continue
+        filename, expected_hash = entry.get("file"), entry.get("sha256")
+        if not isinstance(filename, str) or not filename or Path(filename).name != filename:
+            failures.append(f"{key} file must be a package-relative filename")
+            continue
+        if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            failures.append(f"{key} sha256 must be a lowercase SHA-256 digest")
+            continue
+        path = destination / filename
+        if path.is_symlink() or not path.is_file():
+            failures.append(f"{key} file is missing: {filename}")
+        elif expected_hash != _sha256(path):
+            failures.append(f"{key} checksum mismatch: {filename}")
+    report = manifest.get("validation_report")
+    if isinstance(report, dict) and isinstance(report.get("file"), str):
+        report_path = destination / report["file"]
+        if report_path.is_file() and _report_is_not_passing(report_path):
+            failures.append("validation report does not record a passing result")
     return failures
+
+
+def _report_is_not_passing(path: Path) -> bool:
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return True
+    return not isinstance(report, dict) or report.get("passed") is not True
 
 
 def _sha256(path: Path) -> str:

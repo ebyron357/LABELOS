@@ -62,6 +62,28 @@ def test_package_contains_verified_manifest(tmp_path):
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
 
 
+def test_verify_package_rejects_unsafe_manifest_and_non_passing_report(tmp_path):
+    package = tmp_path / "release"
+    package.mkdir()
+    (package / "validation-report.json").write_text('{"passed": false}', encoding="utf-8")
+    (package / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artwork": {"file": "../outside.svg", "sha256": "0" * 64},
+                "validation_report": {"file": "validation-report.json", "sha256": "0" * 64},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert verify_package(package) == [
+        "artwork file must be a package-relative filename",
+        "validation_report checksum mismatch: validation-report.json",
+        "validation report does not record a passing result",
+    ]
+
+
 def test_cli_validate_and_package(tmp_path, capsys):
     config = tmp_path / "label.json"
     config.write_text(
@@ -165,3 +187,39 @@ def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
 
     assert report.passed
     assert report.metadata["decoded_values"] == [value]
+
+
+def test_invalid_pdf_fails_closed(tmp_path):
+    artwork = tmp_path / "invalid.pdf"
+    artwork.write_bytes(b"not a PDF")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.issues[0].code == "PDF_INVALID"
+
+
+def test_low_resolution_pdf_image_fails(tmp_path):
+    image = qrcode.make("https://example.test/low-resolution")
+    image_path = tmp_path / "qr.png"
+    image.save(image_path)
+    artwork = tmp_path / "low-resolution.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=100 / (25.4 / 72), height=100 / (25.4 / 72))
+    page.insert_image(page.rect, filename=image_path)
+    document.save(artwork)
+    document.close()
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300},
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "PDF_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+    assert report.metadata["pdf"]["images"][0]["dpi"] < 300

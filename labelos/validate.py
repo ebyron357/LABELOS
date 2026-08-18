@@ -118,7 +118,11 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
     except ImportError:
         report.add("PDF_READER_UNAVAILABLE", "error", "Install PyMuPDF to inspect PDF artwork")
         return ""
-    document = pymupdf.open(spec.artwork)
+    try:
+        document = pymupdf.open(spec.artwork)
+    except (OSError, RuntimeError, ValueError, pymupdf.FileDataError) as error:
+        report.add("PDF_INVALID", "error", f"Could not open PDF artwork: {error}")
+        return ""
     try:
         if document.page_count != 1:
             report.add("PDF_PAGE_COUNT", "error", f"Artwork must contain one page, found {document.page_count}")
@@ -130,9 +134,35 @@ def _validate_pdf(spec: LabelSpec, report: Report) -> str:
         report.metadata["pdf"] = {"pages": document.page_count, "fonts": len(page.get_fonts())}
         if not page.get_fonts():
             report.add("PDF_NO_FONTS", "warning", "PDF contains no embedded font resources")
+        _validate_pdf_image_resolution(spec, page, document, report)
         return text
     finally:
         document.close()
+
+
+def _validate_pdf_image_resolution(spec: LabelSpec, page, document, report: Report) -> None:
+    """Reject placed raster PDF images whose effective resolution is too low."""
+
+    images: list[dict[str, float | int]] = []
+    for image in page.get_images(full=True):
+        xref = image[0]
+        image_info = document.extract_image(xref)
+        width, height = image_info["width"], image_info["height"]
+        for rectangle in page.get_image_rects(xref):
+            if rectangle.width <= 0 or rectangle.height <= 0:
+                continue
+            dpi = min(width / (rectangle.width / 72), height / (rectangle.height / 72))
+            images.append({"xref": xref, "dpi": round(dpi, 2), "width_px": width, "height_px": height})
+            if dpi < spec.min_dpi:
+                report.add(
+                    "PDF_IMAGE_DPI_TOO_LOW",
+                    "error",
+                    f"Embedded image xref {xref} has effective resolution {dpi:.1f} DPI; "
+                    f"minimum is {spec.min_dpi} DPI",
+                )
+    if images:
+        report.checks.append("pdf-image-resolution")
+        report.metadata["pdf"]["images"] = images
 
 
 def _validate_physical_size(spec: LabelSpec, width: float, height: float, report: Report) -> None:
