@@ -12,7 +12,8 @@ from typing import Any
 
 from .models import LabelSpec, Report
 
-_PACKAGE_SCHEMA_VERSION = 1
+_PACKAGE_SCHEMA_VERSION = 2
+_SUPPORTED_PACKAGE_SCHEMA_VERSIONS = {1, _PACKAGE_SCHEMA_VERSION}
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _RESERVED_FILENAMES = {"manifest.json", "validation-report.json", "label-spec.json"}
 
@@ -32,6 +33,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -55,6 +57,7 @@ def create_package(
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
         "extras": extra_manifest,
+        "linked_assets": linked_assets,
         "spec": spec_payload,
     }
     manifest_path = destination / "manifest.json"
@@ -76,7 +79,8 @@ def verify_package(destination: Path) -> list[str]:
         return ["manifest.json must contain a JSON object"]
 
     failures: list[str] = []
-    if manifest.get("schema_version") != _PACKAGE_SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in _SUPPORTED_PACKAGE_SCHEMA_VERSIONS:
         failures.append(f"unsupported manifest schema version: {manifest.get('schema_version')!r}")
 
     entries: dict[str, Path] = {}
@@ -94,8 +98,45 @@ def verify_package(destination: Path) -> list[str]:
             if extra_path is not None and not _is_package_filename(str(entry.get("file", name))):
                 failures.append(f"extra file path is invalid: {name}")
 
+    if schema_version == _PACKAGE_SCHEMA_VERSION:
+        _validate_linked_assets(destination, manifest.get("linked_assets"), failures)
     _validate_report_and_spec(manifest, entries, failures)
     return failures
+
+
+def _copy_linked_assets(spec: LabelSpec, report: Report, destination: Path) -> dict[str, dict[str, str | int]]:
+    """Copy validated SVG linked rasters using their original relative paths."""
+
+    linked = report.metadata.get("svg_linked_images", [])
+    if not isinstance(linked, list):
+        raise TypeError("Validated report has invalid linked SVG image metadata")
+    assets: dict[str, dict[str, str | int]] = {}
+    artwork_root = spec.artwork.parent.resolve()
+    for image in linked:
+        if not isinstance(image, dict) or not isinstance(image.get("file"), str):
+            raise TypeError("Validated report has invalid linked SVG image metadata")
+        relative_path = image["file"]
+        if not _is_package_relative_path(relative_path):
+            raise ValueError(f"Validated report has unsafe linked SVG image path: {relative_path}")
+        source = artwork_root / relative_path
+        current = artwork_root
+        for component in Path(relative_path).parts:
+            current = current / component
+            if current.is_symlink():
+                raise ValueError(f"Linked SVG image is missing or unsafe: {relative_path}")
+        if not _is_regular_file(source):
+            raise ValueError(f"Linked SVG image is missing or unsafe: {relative_path}")
+        try:
+            source.resolve().relative_to(artwork_root)
+        except ValueError as error:
+            raise ValueError(f"Linked SVG image escapes artwork directory: {relative_path}") from error
+        target = destination / relative_path
+        if target == destination / spec.artwork.name or target.exists() or relative_path in assets:
+            raise ValueError(f"Linked SVG image conflicts with release package: {relative_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        assets[relative_path] = _manifest_entry(target, destination)
+    return assets
 
 
 def _assert_package_filename(filename: str, extra: bool = False) -> None:
@@ -105,8 +146,9 @@ def _assert_package_filename(filename: str, extra: bool = False) -> None:
         raise ValueError(f"Unsafe package extra filename: {filename}")
 
 
-def _manifest_entry(path: Path) -> dict[str, str | int]:
-    return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
+def _manifest_entry(path: Path, root: Path | None = None) -> dict[str, str | int]:
+    filename = path.relative_to(root).as_posix() if root is not None else path.name
+    return {"file": filename, "sha256": sha256_file(path), "bytes": path.stat().st_size}
 
 
 def _is_regular_file(path: Path) -> bool:
@@ -116,6 +158,15 @@ def _is_regular_file(path: Path) -> bool:
 def _is_package_filename(value: str) -> bool:
     path = Path(value)
     return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
+
+
+def _is_package_relative_path(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
 
 
 def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
@@ -146,6 +197,31 @@ def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]
         failures.append(f"{key} byte count mismatch: {filename}")
 
     return path
+
+
+def _validate_linked_assets(destination: Path, assets: Any, failures: list[str]) -> None:
+    if not isinstance(assets, dict):
+        failures.append("linked_assets manifest entry must be an object")
+        return
+    for name, entry in assets.items():
+        if not isinstance(name, str) or not _is_package_relative_path(name):
+            failures.append(f"linked asset path is invalid: {name!r}")
+            continue
+        if not isinstance(entry, dict) or entry.get("file") != name:
+            failures.append(f"linked asset manifest entry is invalid: {name}")
+            continue
+        path = destination / name
+        if not _is_regular_file(path):
+            failures.append(f"linked asset file is missing or is not a regular file: {name}")
+            continue
+        digest = entry.get("sha256")
+        if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+            failures.append(f"linked asset sha256 must be a lowercase SHA-256 digest: {name}")
+        elif digest != sha256_file(path):
+            failures.append(f"linked asset checksum mismatch: {name}")
+        byte_count = entry.get("bytes")
+        if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count != path.stat().st_size:
+            failures.append(f"linked asset byte count mismatch: {name}")
 
 
 def _validate_report_and_spec(
