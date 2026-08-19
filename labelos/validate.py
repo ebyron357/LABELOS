@@ -9,7 +9,7 @@ import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
@@ -155,7 +155,7 @@ def _svg_length_mm(value: str | None) -> float | None:
 
 
 def _svg_embedded_raster_data(href: str) -> bytes | None:
-    if not href.startswith("data:image/"):
+    if not href.lower().startswith("data:image/"):
         return None
     try:
         header, payload = href.split(",", 1)
@@ -166,6 +166,45 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         return unquote_to_bytes(payload)
     except (ValueError, base64.binascii.Error) as error:
         raise ValueError(f"invalid data URI: {error}") from error
+
+
+def _svg_linked_raster_path(artwork: Path, href: str) -> Path | None:
+    """Resolve a local linked image without letting artwork escape its directory.
+
+    Release packages must be self-contained, so remote URLs and any path that is not a
+    simple, local, non-symlinked relative file fail closed rather than being skipped.
+    Vector SVG references are intentionally returned as ``None``: they are not rasters
+    and therefore do not have an effective DPI to validate.
+    """
+
+    parts = urlsplit(href)
+    if (
+        parts.scheme
+        or parts.netloc
+        or parts.query
+        or parts.fragment
+        or "\\" in href
+        or Path(parts.path).is_absolute()
+        or not parts.path
+    ):
+        raise ValueError("linked image href must be a plain relative local path")
+    relative = Path(parts.path)
+    if ".." in relative.parts:
+        raise ValueError("linked image href must not traverse parent directories")
+    root = artwork.parent.resolve()
+    candidate = artwork.parent / relative
+    if candidate.is_symlink():
+        raise ValueError("linked image must not be a symbolic link")
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise ValueError("linked image resolves outside the artwork directory") from error
+    if not resolved.is_file():
+        raise ValueError("linked image does not exist or is not a regular file")
+    if resolved.suffix.lower() == ".svg":
+        return None
+    return resolved
 
 
 def _svg_image_display_mm(
@@ -230,6 +269,7 @@ def _validate_svg_embedded_rasters(
         return
     report.checks.append("svg-embedded-raster-resolution")
     inspected_images = []
+    linked_assets: list[str] = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
@@ -237,8 +277,12 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
+            linked_path: Path | None = None
             if data is None:
-                continue
+                linked_path = _svg_linked_raster_path(spec.artwork, href)
+                if linked_path is None:
+                    continue
+                data = linked_path.read_bytes()
             from PIL import Image
 
             with Image.open(BytesIO(data)) as raster:
@@ -256,6 +300,10 @@ def _validate_svg_embedded_rasters(
                     "dpi": round(effective_dpi, 2),
                 }
             )
+            if linked_path is not None:
+                relative = linked_path.relative_to(spec.artwork.parent.resolve()).as_posix()
+                inspected_images[-1]["file"] = relative
+                linked_assets.append(relative)
             if effective_dpi < spec.min_dpi:
                 report.add(
                     "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
@@ -271,6 +319,8 @@ def _validate_svg_embedded_rasters(
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
+    if linked_assets:
+        report.metadata["svg_linked_assets"] = linked_assets
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:
