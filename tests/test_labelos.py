@@ -467,6 +467,83 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "placed.png"
+    Image.new("RGB", (600, 600), "black").save(raster)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm" '
+            'viewBox="0 0 100 100"><image href="assets/placed.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"] == [{"index": 1, "file": "assets/placed.png"}]
+    assert (manifest.parent / "assets" / "placed.png").read_bytes() == raster.read_bytes()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "assets" / "placed.png").write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked asset:assets/placed.png checksum mismatch: assets/placed.png",
+        "linked asset:assets/placed.png byte count mismatch: assets/placed.png",
+    ]
+
+
+@pytest.mark.parametrize("href", ["https://example.test/placed.png", "../placed.png", "/tmp/placed.png"])
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm" '
+            f'viewBox="0 0 100 100"><image href="{href}" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_RASTER_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_symlinked_svg_raster_fails_closed(tmp_path):
+    target = tmp_path / "target.png"
+    Image.new("RGB", (600, 600), "black").save(target)
+    linked = tmp_path / "linked.png"
+    try:
+        linked.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm" '
+            'viewBox="0 0 100 100"><image href="linked.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_RASTER_INSPECTION_FAILED" for issue in report.issues)
+
+
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     value = "LABELOS-PDF-12345"
     barcode_path = Path(
