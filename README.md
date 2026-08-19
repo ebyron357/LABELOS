@@ -16,6 +16,10 @@ python -m pip install -e ".[test,dev]"
 labelos doctor --json
 ```
 
+If `pip` reports that scripts were installed in a directory outside `PATH`, add it for the
+current shell before running `labelos` (for example,
+`export PATH="$HOME/.local/bin:$PATH"`), or use `python -m labelos.cli`.
+
 `doctor` must show Pillow, PyMuPDF, and ZXing-C++ as available. Callas pdfToolbox is
 reported as `SKIPPED_NOT_CONFIGURED` until a real licensed adapter exists. That is
 expected. Do not treat it as a pass.
@@ -98,6 +102,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | A local linked SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | A linked SVG raster is remote, unsafe, missing, unreadable, or not a raster |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
