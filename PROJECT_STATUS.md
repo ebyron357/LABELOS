@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative rasters are DPI-validated, included in release packages, and checksum-verified; missing, remote, traversal, URL-component, and symlink targets fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -106,3 +106,15 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Latest autonomous completion work
+
+2026-08-19: Linked SVG raster assets are no longer skipped. Relative local raster files
+are decoded and effective-DPI validated, copied into schema-2 release packages at their
+original relative paths, and individually checksum-verified. URL/query/fragment,
+traversal, missing, and symlink references fail closed. Full verification details and
+commit SHA are recorded by the automation run that lands this change. Verification:
+`python3 -m pytest -q` (61 passed), `python3 -m ruff check .`,
+`python3 -m compileall -q labelos illustrator_bridge tests`, `python3 -m pip check`,
+and `python3 -m build`; CLI doctor, passing/failing validation, package, and package
+verification also passed. Callas remains `SKIPPED_NOT_CONFIGURED`.
