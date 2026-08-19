@@ -467,6 +467,74 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
+def test_linked_svg_raster_is_validated_packaged_and_verified(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "print.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/print.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/print.png"
+    assert manifest_data["schema_version"] == 2
+    assert manifest_data["linked_assets"]["assets/print.png"]["file"] == "assets/print.png"
+    assert (manifest.parent / "assets" / "print.png").is_file()
+    assert verify_package(manifest.parent) == []
+
+
+@pytest.mark.parametrize("href", ["https://example.test/print.png", "../print.png", "/print.png"])
+def test_svg_linked_raster_rejects_nonlocal_or_unsafe_paths(tmp_path, href):
+    artwork = tmp_path / "unsafe-linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            f'viewBox="0 0 100 100"><image href="{href}" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 100}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_low_resolution_linked_svg_image_fails(tmp_path):
+    raster = tmp_path / "low.png"
+    Image.new("RGB", (72, 72), "black").save(raster)
+    artwork = tmp_path / "low-linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="low.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     value = "LABELOS-PDF-12345"
     barcode_path = Path(
