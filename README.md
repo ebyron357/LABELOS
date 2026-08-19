@@ -20,6 +20,9 @@ labelos doctor --json
 reported as `SKIPPED_NOT_CONFIGURED` until a real licensed adapter exists. That is
 expected. Do not treat it as a pass.
 
+After installation, every operator command is also available as `python -m labelos`;
+use that form when the console-script directory is not on `PATH`.
+
 ## Operator workflow
 
 1. **Install** LABELOS as above.
@@ -98,6 +101,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | A local raster linked from SVG is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | A local SVG raster reference is unsafe, missing, unreadable, or cannot be inspected |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
