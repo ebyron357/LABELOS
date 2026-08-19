@@ -467,6 +467,105 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
+def _write_linked_raster_svg(artwork: Path, href: str) -> None:
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm" '
+            'viewBox="0 0 100 100">'
+            f'<image href="{href}" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_linked_svg_raster_is_dpi_checked_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    linked_raster = assets / "high-resolution.png"
+    Image.new("RGB", (600, 600), "black").save(linked_raster)
+    artwork = tmp_path / "linked.svg"
+    _write_linked_raster_svg(artwork, "assets/high-resolution.png")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/high-resolution.png"
+    assert report.metadata["svg_linked_images"][0]["dpi"] == 600.0
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["schema_version"] == 2
+    assert manifest_data["linked_assets"]["assets/high-resolution.png"]["file"] == "assets/high-resolution.png"
+    assert (manifest.parent / "assets" / "high-resolution.png").read_bytes() == linked_raster.read_bytes()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "assets" / "high-resolution.png").write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked asset:assets/high-resolution.png checksum mismatch: assets/high-resolution.png",
+        "linked asset:assets/high-resolution.png byte count mismatch: assets/high-resolution.png",
+    ]
+
+
+def test_low_resolution_linked_svg_raster_fails(tmp_path):
+    linked_raster = tmp_path / "low-resolution.png"
+    Image.new("RGB", (72, 72), "black").save(linked_raster)
+    artwork = tmp_path / "linked.svg"
+    _write_linked_raster_svg(artwork, linked_raster.name)
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert report.metadata["svg_linked_images"][0]["dpi"] == 72.0
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["https://example.test/image.png", "file:///tmp/image.png", "../outside.png", "/tmp/image.png", "missing.png"],
+)
+def test_unsafe_or_missing_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "linked.svg"
+    _write_linked_raster_svg(artwork, href)
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_symlinked_svg_raster_fails_closed(tmp_path):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (600, 600), "black").save(source)
+    link = tmp_path / "linked.png"
+    try:
+        link.symlink_to(source)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+    artwork = tmp_path / "linked.svg"
+    _write_linked_raster_svg(artwork, link.name)
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_schema_one_release_package_remains_verifiable(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    data.pop("linked_assets")
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert not verify_package(manifest.parent)
+
+
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     value = "LABELOS-PDF-12345"
     barcode_path = Path(
