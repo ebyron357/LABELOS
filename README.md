@@ -98,6 +98,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | A linked SVG raster is remote, unsafe, missing, unreadable, or a symlink |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
@@ -105,6 +106,10 @@ byte-count mismatches, and reports that do not record a pass.
 | `DECODER_UNAVAILABLE` | Pillow or zxing-cpp is missing while a code was requested |
 
 ## Capabilities
+
+Linked SVG raster files must be local, relative regular files beneath the SVG directory.
+They are resolution-checked, copied into the release package at the same relative path,
+and recorded in the manifest for checksum verification.
 
 See [PROJECT_STATUS.md](PROJECT_STATUS.md) for **AVAILABLE NOW**, **PARTIAL**,
 **EXTERNAL DEPENDENCY**, and **FUTURE**. Commercial Callas/pdfToolbox preflight is
