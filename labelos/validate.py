@@ -168,6 +168,37 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def _svg_linked_raster_path(artwork: Path, href: str) -> tuple[Path, str]:
+    """Resolve a linked SVG raster without allowing an SVG to escape its directory."""
+    if "://" in href or href.startswith(("/", "\\")) or "?" in href or "#" in href:
+        raise ValueError("linked image must be a local relative file reference")
+    relative = Path(href)
+    if (
+        not href
+        or relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise ValueError("linked image path must be a safe relative path")
+    root = artwork.parent.resolve()
+    resolved = (root / relative).resolve()
+    try:
+        package_relative = resolved.relative_to(root)
+    except ValueError as error:
+        raise ValueError("linked image path escapes the SVG directory") from error
+    if not resolved.is_file() or resolved.is_symlink():
+        raise ValueError("linked image is missing, unreadable, or not a regular file")
+    return resolved, package_relative.as_posix()
+
+
+def _svg_raster_pixels(data: bytes) -> tuple[int, int]:
+    from PIL import Image
+
+    with Image.open(BytesIO(data)) as raster:
+        pixels = raster.size
+        raster.load()
+    return pixels
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -228,8 +259,9 @@ def _validate_svg_embedded_rasters(
     images = [element for element in root.iter() if _local_name(element.tag) == "image"]
     if not images:
         return
-    report.checks.append("svg-embedded-raster-resolution")
-    inspected_images = []
+    report.checks.append("svg-raster-resolution")
+    embedded_images = []
+    linked_images = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
@@ -237,40 +269,47 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
+            linked_file = None
             if data is None:
-                continue
-            from PIL import Image
-
-            with Image.open(BytesIO(data)) as raster:
-                pixels = raster.size
+                linked_path, linked_file = _svg_linked_raster_path(spec.artwork, href)
+                data = linked_path.read_bytes()
+            pixels = _svg_raster_pixels(data)
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
                 pixels[0] / (display_width / 25.4),
                 pixels[1] / (display_height / 25.4),
             )
-            inspected_images.append(
-                {
-                    "index": index,
-                    "pixels": {"width": pixels[0], "height": pixels[1]},
-                    "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
-                    "dpi": round(effective_dpi, 2),
-                }
-            )
+            details = {
+                "index": index,
+                "pixels": {"width": pixels[0], "height": pixels[1]},
+                "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
+                "dpi": round(effective_dpi, 2),
+            }
+            if linked_file is None:
+                embedded_images.append(details)
+            else:
+                linked_images.append({**details, "file": linked_file})
             if effective_dpi < spec.min_dpi:
                 report.add(
-                    "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
+                    "SVG_LINKED_IMAGE_DPI_TOO_LOW" if linked_file else "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
                     "error",
-                    f"Embedded image {index} has effective resolution {effective_dpi:.1f} DPI; "
+                    f"{'Linked' if linked_file else 'Embedded'} image {index} has effective resolution "
+                    f"{effective_dpi:.1f} DPI; "
                     f"minimum is {spec.min_dpi} DPI",
                 )
         except (ImportError, OSError, ValueError) as error:
             report.add(
-                "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
+                "SVG_LINKED_IMAGE_INSPECTION_FAILED"
+                if not href.startswith("data:image/")
+                else "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
                 "error",
-                f"Could not inspect embedded image {index}: {error}",
+                f"Could not inspect {'linked' if not href.startswith('data:image/') else 'embedded'} "
+                f"image {index}: {error}",
             )
-    if inspected_images:
-        report.metadata["svg_embedded_images"] = inspected_images
+    if embedded_images:
+        report.metadata["svg_embedded_images"] = embedded_images
+    if linked_images:
+        report.metadata["svg_linked_images"] = linked_images
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:

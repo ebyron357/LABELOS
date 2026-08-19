@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked local SVG raster files | **AVAILABLE NOW** (safe relative regular files only; DPI checked, packaged, and checksummed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -47,10 +47,10 @@ they are **not** required to use LABELOS on production artwork today.
 
 ```text
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python -m labelos doctor --json
+python -m labelos validate examples/label.json --json
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release
 ```
 
 ## Known real blockers
@@ -89,19 +89,20 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-19 after linked-raster/package and module-CLI implementation
+`e6e5ccc667e11b283726af44349814219f53bb63`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 62 passed; one FastAPI/httpx deprecation warning
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
 python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python -m labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
+python -m labelos validate examples/label.json --json          # PASS
+python -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
