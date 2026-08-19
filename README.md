@@ -31,8 +31,9 @@ expected. Do not treat it as a pass.
 7. **Validate again** until the report shows `"passed": true`.
 8. **Package:** `labelos package examples/label.json releases/sku-revision`
 9. **Verify the package:** `labelos verify-package releases/sku-revision`
-10. **Release** only the verified package directory. Keep the artwork, `validation-report.json`,
-    `label-spec.json`, and `manifest.json` together. Do not edit files after packaging.
+10. **Release** only the verified package directory. Keep the artwork, any local SVG raster
+    assets, `validation-report.json`, `label-spec.json`, and `manifest.json` together. Do not
+    edit files after packaging.
 
 ## Minimal working example
 
@@ -98,11 +99,18 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | Linked local SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | Linked SVG image is remote, unsafe, missing, symlinked, or unreadable |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
 | `CODE_VALUE_MISMATCH` | QR/barcode did not decode to the expected value |
 | `DECODER_UNAVAILABLE` | Pillow or zxing-cpp is missing while a code was requested |
+
+SVG `image` references may be embedded data URIs or relative local raster files. Remote URLs,
+absolute paths, traversal, symlinks, missing files, and unreadable linked rasters fail
+validation. Passing linked rasters are copied into the package at their original relative paths
+and independently checksum-verified by `verify-package`.
 
 ## Capabilities
 

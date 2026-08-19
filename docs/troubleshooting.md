@@ -5,7 +5,8 @@
 | `ERROR: Configuration file does not exist` | Wrong path to JSON spec | Use a path relative to the current directory |
 | `ARTWORK_MISSING` | Artwork path in the spec is wrong | Paths are resolved relative to the spec file |
 | `DIMENSIONS_MISMATCH` | File size is not trim + bleed | Measure the file; include bleed in the artwork |
-| `DPI_TOO_LOW` / `PDF_IMAGE_DPI_TOO_LOW` / `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed raster is too small | Increase pixel dimensions or reduce placed size |
+| `DPI_TOO_LOW` / `PDF_IMAGE_DPI_TOO_LOW` / `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` / `SVG_LINKED_IMAGE_DPI_TOO_LOW` | Placed raster is too small | Increase pixel dimensions or reduce placed size |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | SVG image reference is remote, unsafe, missing, symlinked, or unreadable | Use a readable raster stored beneath the SVG without symlinks; package it with the SVG |
 | `SAFE_AREA_VIOLATION` | Live matter in the bleed/safe inset | Move type/codes inside trim minus `safe_area_mm` |
 | `REQUIRED_COPY_MISSING` | String not in SVG/PDF text | Match the exact characters; outlined type is not searchable |
 | `CODE_VALUE_MISMATCH` | QR/barcode decodes to something else | Check the expected value; UPC-A may decode as EAN-13 |
