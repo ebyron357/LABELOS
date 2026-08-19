@@ -24,6 +24,8 @@ expected. Do not treat it as a pass.
 
 1. **Install** LABELOS as above.
 2. **Prepare artwork** as SVG, PNG, or single-page PDF. Artwork size must include bleed.
+   SVG raster assets may be embedded or local relative files beneath the SVG directory;
+   remote, absolute, traversal, missing, and symbolic-link `href` values are rejected.
 3. **Create a label spec** JSON file. Start from [`examples/label.json`](examples/label.json).
 4. **Validate:** `labelos validate examples/label.json --json`
 5. **Interpret errors.** Each issue has a `code` and `message`. See [Error codes](#error-codes).
@@ -98,6 +100,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | Local SVG-linked raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | Local SVG-linked raster is unsafe, missing, or unreadable |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
