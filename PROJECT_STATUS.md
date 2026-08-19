@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local paths are decoded, effective-DPI checked, checksummed, and packaged; URLs, traversal, query/fragment, missing files, and symlinks fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,10 +89,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Last verified on 2026-08-19 from branch `cursor/label-production-system-readiness-9a14`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 61 passed (one upstream FastAPI/Starlette deprecation warning)
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -106,3 +106,12 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Next autonomous-run context
+
+The core local CLI path is the supported production workflow. Its newest hardening
+adds schema-2 package manifests for linked SVG raster assets while retaining schema-1
+verification compatibility. Complete the current-run verification record with actual
+test counts and command results before treating this status as final. Remaining
+blockers are human/external only: a licensed Callas profile, an approved printer
+profile, and a decision on OCR for outlined/raster-only required copy.
