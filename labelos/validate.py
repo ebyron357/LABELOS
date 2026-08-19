@@ -168,6 +168,50 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def svg_linked_raster_paths(artwork: Path) -> list[Path]:
+    """Return safe local raster dependencies declared by an SVG artwork file.
+
+    This helper is intentionally strict: a release package must not depend on a
+    remote URL, path traversal, or a symlink whose target could change later.
+    Validation calls it after XML parsing; packaging calls it only for a passing
+    SVG so the exact validated dependencies can be bundled.
+    """
+
+    try:
+        root = ElementTree.fromstring(artwork.read_text(encoding="utf-8", errors="replace"))
+    except ElementTree.ParseError as error:
+        raise ValueError(f"SVG is not valid XML: {error}") from error
+    paths: list[Path] = []
+    for image in (element for element in root.iter() if _local_name(element.tag) == "image"):
+        href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
+        if href and not href.strip().startswith("data:"):
+            paths.append(_resolve_svg_linked_raster(artwork, href))
+    return paths
+
+
+def _resolve_svg_linked_raster(artwork: Path, href: str) -> Path:
+    href = href.strip()
+    if not href or href.startswith("#") or "://" in href or ":" in href or "\\" in href:
+        raise ValueError("href must be a non-empty relative file path")
+    raw = Path(href)
+    if raw.is_absolute() or ".." in raw.parts:
+        raise ValueError("href must not be absolute or contain path traversal")
+    path = artwork.parent / raw
+    if path.is_symlink():
+        raise ValueError("href must not reference a symlink")
+    if not path.is_file():
+        raise ValueError("href does not reference a regular file")
+    # `resolve()` additionally protects against a symlink in an ancestor.
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(artwork.parent.resolve())
+    except ValueError as error:
+        raise ValueError("href escapes the artwork directory") from error
+    if any(parent.is_symlink() for parent in (path.parent, *path.parents) if parent != artwork.parent.parent):
+        raise ValueError("href must not be located under a symlinked directory")
+    return resolved
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -228,7 +272,7 @@ def _validate_svg_embedded_rasters(
     images = [element for element in root.iter() if _local_name(element.tag) == "image"]
     if not images:
         return
-    report.checks.append("svg-embedded-raster-resolution")
+    report.checks.append("svg-raster-resolution")
     inspected_images = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
@@ -237,12 +281,19 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
-            if data is None:
-                continue
             from PIL import Image
 
-            with Image.open(BytesIO(data)) as raster:
+            source: str
+            if data is None:
+                raster_path = _resolve_svg_linked_raster(spec.artwork, href)
+                raster_source = raster_path
+                source = "linked"
+            else:
+                raster_source = BytesIO(data)
+                source = "embedded"
+            with Image.open(raster_source) as raster:
                 pixels = raster.size
+                raster.load()
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
                 pixels[0] / (display_width / 25.4),
@@ -254,20 +305,22 @@ def _validate_svg_embedded_rasters(
                     "pixels": {"width": pixels[0], "height": pixels[1]},
                     "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
                     "dpi": round(effective_dpi, 2),
+                    "source": source,
                 }
             )
             if effective_dpi < spec.min_dpi:
                 report.add(
-                    "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
+                    f"SVG_{source.upper()}_IMAGE_DPI_TOO_LOW",
                     "error",
-                    f"Embedded image {index} has effective resolution {effective_dpi:.1f} DPI; "
+                    f"{source.title()} image {index} has effective resolution {effective_dpi:.1f} DPI; "
                     f"minimum is {spec.min_dpi} DPI",
                 )
         except (ImportError, OSError, ValueError) as error:
+            source = "linked" if not href.strip().startswith("data:") else "embedded"
             report.add(
-                "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
+                f"SVG_{source.upper()}_IMAGE_INSPECTION_FAILED",
                 "error",
-                f"Could not inspect embedded image {index}: {error}",
+                f"Could not inspect {source} image {index}: {error}",
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
