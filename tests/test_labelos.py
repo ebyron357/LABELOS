@@ -280,6 +280,8 @@ def test_package_rejects_unsafe_extra_filename(tmp_path):
     report = validate(spec)
     with pytest.raises(ValueError, match="Unsafe package extra filename"):
         create_package(spec, report, tmp_path / "release", extras={"../secret.json": "{}"})
+    with pytest.raises(ValueError, match="Unsafe package extra filename"):
+        create_package(spec, report, tmp_path / "nested-release", extras={"nested/extra.json": "{}"})
 
 
 def test_verify_package_rejects_path_traversal(tmp_path):
@@ -465,6 +467,88 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def _linked_image_svg(href: str) -> str:
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm" '
+        'viewBox="0 0 72 72">'
+        f'<image href="{href}" width="72" height="72"/></svg>'
+    )
+
+
+def test_linked_svg_raster_is_dpi_checked_packaged_and_verified(tmp_path):
+    asset = tmp_path / "assets" / "print.png"
+    asset.parent.mkdir()
+    Image.new("RGB", (600, 600), "black").save(asset)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(_linked_image_svg("assets/print.png"), encoding="utf-8")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_embedded_images"][0]["dpi"] == 600
+    assert report.metadata["svg_embedded_images"][0]["file"] == "assets/print.png"
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["linked_assets"]["assets/print.png"]["file"] == "assets/print.png"
+    assert (manifest.parent / "assets" / "print.png").is_file()
+    assert not verify_package(manifest.parent)
+
+    packaged_asset = manifest.parent / "assets" / "print.png"
+    packaged_asset.write_bytes(b"x" * packaged_asset.stat().st_size)
+    assert verify_package(manifest.parent) == ["linked asset:assets/print.png checksum mismatch: assets/print.png"]
+
+
+def test_linked_svg_raster_changed_after_validation_cannot_be_packaged(tmp_path):
+    asset = tmp_path / "assets" / "print.png"
+    asset.parent.mkdir()
+    Image.new("RGB", (600, 600), "black").save(asset)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(_linked_image_svg("assets/print.png"), encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+    report = validate(spec)
+    asset.write_bytes(b"x" * asset.stat().st_size)
+
+    with pytest.raises(ValueError, match="Linked SVG asset changed after validation"):
+        create_package(spec, report, tmp_path / "release")
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["https://example.test/asset.png", "../asset.png", "assets/missing.png"],
+)
+def test_linked_svg_raster_rejects_unsafe_or_missing_references(tmp_path, href):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(_linked_image_svg(href), encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_linked_svg_raster_rejects_symlink(tmp_path):
+    target = tmp_path / "asset.png"
+    Image.new("RGB", (600, 600), "black").save(target)
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    try:
+        (assets / "print.png").symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(_linked_image_svg("assets/print.png"), encoding="utf-8")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
