@@ -106,3 +106,6 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+Render Blueprint and deployment instructions target `main`. Render CLI schema validation
+was **TOOL UNAVAILABLE** in this environment; no Render deployment was attempted.
