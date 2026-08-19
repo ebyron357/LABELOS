@@ -1,6 +1,7 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: `main` (merge commit `19167e0`, incorporating
+`stabilize/canonical-validator`).
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -36,12 +37,12 @@ they are **not** required to use LABELOS on production artwork today.
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
-| HTTP API / n8n orchestration | **FUTURE** (code exists; not the operator path) |
+| HTTP API / n8n orchestration | **OPTIONAL** (authenticated API and inactive n8n scaffold; not the primary operator path) |
 | Illustrator generation | **FUTURE** (workstation bridge exists; live COM requires Illustrator) |
 | Prompt-to-label generation | **FUTURE** |
 | Web UI / visual editing | **FUTURE** |
 | Brand libraries / SKU templates | **FUTURE** |
-| Approval workflows as a product | **FUTURE** |
+| API approval/release lifecycle | **OPTIONAL** (checksum-bound API lifecycle; human approval remains required) |
 
 ## Operator path (use this)
 
@@ -68,13 +69,13 @@ labelos verify-package storage/demo-release
 - Web UI and visual editing
 - Brand libraries and SKU templates
 - Illustrator generation as a supported production path
-- Approval workflows
+- A complete approval-workflow product UI
 - Public APIs and automated orchestration
 
 ## Superseded overlapping PRs
 
 Do **not** merge the historical hardening swarm. Unique valid behavior from those PRs was
-reproduced on `stabilize/canonical-validator`. Close as superseded:
+reproduced in the validator lineage now merged to `main`. Close as superseded:
 
 - Malformed-PDF fail-closed: #120, #121, #122, #124
 - PDF embedded-image DPI: #109, #113, #129, #133
@@ -84,25 +85,31 @@ reproduced on `stabilize/canonical-validator`. Close as superseded:
 - Generic “harden label production validation” duplicates: #85, #90, #95, #118, #125–#127, #131, #132
 - Broader duplicates in the same series: #7–#83 with the same titles
 
-Keep `main` (#6 and earlier) as history. `feat/production-label-automation` remains the
-optional API/bridge lineage; it is not the operator-facing product.
+`main` is the deployment and canonical implementation branch. The CLI remains the
+operator-facing product; the API/bridge are optional layers.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-19 from `main` state `19167e0` plus the deployment configuration
+regression change in this run:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 57 passed (one FastAPI/httpx deprecation warning)
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
+python -m build                          # sdist and wheel in dist/ (no setuptools package-discovery warning)
 labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
 labelos validate examples/label.json --json          # PASS
 labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+labelos package examples/label.json /tmp/labelos-production-e2e-20260819
+labelos verify-package /tmp/labelos-production-e2e-20260819  # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Next actionable engineering task
+
+Linked SVG raster files referenced with non-data-URI `href` values are currently skipped.
+Implement fail-closed local-file validation, checksum-backed inclusion in release packages,
+and regression fixtures; remote, traversal, missing, and symlink references must fail.

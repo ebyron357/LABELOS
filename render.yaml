@@ -2,7 +2,7 @@
 # https://render.com/docs/blueprint-spec
 #
 # Deploy: Render Dashboard → New → Blueprint → select ebyron357/LABELOS
-# (branch feat/production-label-automation until merged).
+# (branch main, which contains the canonical validated release engine).
 # Set LABELOS_API_TOKEN in the dashboard when prompted (sync: false).
 # Persistent disk keeps releases/jobs across deploys (requires paid plan).
 
@@ -12,7 +12,7 @@ services:
     runtime: python
     plan: starter
     region: oregon
-    branch: feat/production-label-automation
+    branch: main
     autoDeploy: true
     buildCommand: pip install --upgrade pip setuptools wheel && pip install .
     startCommand: labelos-api
