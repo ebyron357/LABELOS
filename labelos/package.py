@@ -12,7 +12,8 @@ from typing import Any
 
 from .models import LabelSpec, Report
 
-_PACKAGE_SCHEMA_VERSION = 1
+_PACKAGE_SCHEMA_VERSION = 2
+_SUPPORTED_PACKAGE_SCHEMA_VERSIONS = {1, _PACKAGE_SCHEMA_VERSION}
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _RESERVED_FILENAMES = {"manifest.json", "validation-report.json", "label-spec.json"}
 
@@ -32,6 +33,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_svg_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -54,6 +56,7 @@ def create_package(
         "artwork": _manifest_entry(artwork_destination),
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
+        "linked_assets": linked_assets,
         "extras": extra_manifest,
         "spec": spec_payload,
     }
@@ -76,7 +79,8 @@ def verify_package(destination: Path) -> list[str]:
         return ["manifest.json must contain a JSON object"]
 
     failures: list[str] = []
-    if manifest.get("schema_version") != _PACKAGE_SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in _SUPPORTED_PACKAGE_SCHEMA_VERSIONS:
         failures.append(f"unsupported manifest schema version: {manifest.get('schema_version')!r}")
 
     entries: dict[str, Path] = {}
@@ -94,6 +98,20 @@ def verify_package(destination: Path) -> list[str]:
             if extra_path is not None and not _is_package_filename(str(entry.get("file", name))):
                 failures.append(f"extra file path is invalid: {name}")
 
+    if schema_version == _PACKAGE_SCHEMA_VERSION:
+        linked_assets = manifest.get("linked_assets")
+        if not isinstance(linked_assets, dict):
+            failures.append("linked_assets manifest entry must be an object")
+        else:
+            for name, entry in linked_assets.items():
+                path = _validate_entry(destination, f"linked asset:{name}", entry, failures, nested=True)
+                if path is not None and (
+                    not isinstance(name, str)
+                    or not _is_package_relative_path(name)
+                    or entry.get("file") != name
+                ):
+                    failures.append(f"linked asset file path is invalid: {name}")
+
     _validate_report_and_spec(manifest, entries, failures)
     return failures
 
@@ -109,6 +127,45 @@ def _manifest_entry(path: Path) -> dict[str, str | int]:
     return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
 
 
+def _nested_manifest_entry(path: Path, destination: Path) -> dict[str, str | int]:
+    return {
+        "file": path.relative_to(destination).as_posix(),
+        "sha256": sha256_file(path),
+        "bytes": path.stat().st_size,
+    }
+
+
+def _copy_linked_svg_assets(spec: LabelSpec, report: Report, destination: Path) -> dict[str, Any]:
+    """Copy validator-approved SVG raster dependencies into the release package."""
+
+    linked_assets: dict[str, Any] = {}
+    images = report.metadata.get("svg_linked_images", [])
+    if not isinstance(images, list):
+        raise TypeError("Validation report linked SVG image metadata is invalid")
+    base = spec.artwork.parent.resolve()
+    for image in images:
+        if not isinstance(image, dict) or not isinstance(image.get("file"), str):
+            raise TypeError("Validation report linked SVG image metadata is invalid")
+        relative = Path(image["file"])
+        if not _is_package_relative_path(image["file"]):
+            raise ValueError(f"Unsafe linked SVG image path: {image['file']}")
+        source = spec.artwork.parent / relative
+        component = spec.artwork.parent
+        for part in relative.parts:
+            component /= part
+            if component.is_symlink():
+                raise ValueError(f"Linked SVG image is missing or unsafe: {image['file']}")
+        if not _is_regular_file(source) or not source.resolve().is_relative_to(base):
+            raise ValueError(f"Linked SVG image is missing or unsafe: {image['file']}")
+        target = destination / relative
+        if target == destination / spec.artwork.name or target.exists():
+            raise ValueError(f"Linked SVG image conflicts with a package file: {image['file']}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        linked_assets[relative.as_posix()] = _nested_manifest_entry(target, destination)
+    return linked_assets
+
+
 def _is_regular_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
 
@@ -118,14 +175,31 @@ def _is_package_filename(value: str) -> bool:
     return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
 
 
-def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
+def _is_package_relative_path(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and "\\" not in value
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def _validate_entry(
+    destination: Path, key: str, entry: Any, failures: list[str], nested: bool = False
+) -> Path | None:
     if not isinstance(entry, dict):
         failures.append(f"{key} manifest entry is missing or invalid")
         return None
 
     filename = entry.get("file")
-    if not isinstance(filename, str) or not _is_package_filename(filename):
-        failures.append(f"{key} file must be a package-relative filename")
+    valid_path = _is_package_relative_path(filename) if nested and isinstance(filename, str) else _is_package_filename(filename)
+    if not valid_path:
+        failures.append(
+            f"{key} file must be a package-relative path"
+            if nested
+            else f"{key} file must be a package-relative filename"
+        )
         return None
 
     path = destination / filename
