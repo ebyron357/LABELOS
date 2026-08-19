@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,17 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_cli_doctor_runs_from_python():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +478,98 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_validated_and_preserved_in_package(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    image_path = assets / "high-resolution.png"
+    Image.new("RGB", (1200, 1200), "black").save(image_path)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20"><image href="assets/high-resolution.png" '
+            'width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/high-resolution.png"
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["schema_version"] == 2
+    assert manifest_data["linked_assets"][0]["file"] == "assets/high-resolution.png"
+    assert not verify_package(manifest.parent)
+    packaged_asset = manifest.parent / "assets" / "high-resolution.png"
+    packaged_asset.write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked asset 1 checksum mismatch: assets/high-resolution.png",
+        "linked asset 1 byte count mismatch: assets/high-resolution.png",
+    ]
+
+
+def test_linked_svg_raster_fails_closed_for_unsafe_or_low_resolution_files(tmp_path):
+    image_path = tmp_path / "low-resolution.png"
+    Image.new("RGB", (20, 20), "black").save(image_path)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20"><image href="low-resolution.png" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in validate(spec).issues)
+
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm">'
+            '<image href="../outside.png" width="10mm" height="10mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in validate(spec).issues)
+
+
+def test_verify_package_rejects_symlinked_linked_asset_directory(tmp_path):
+    source_assets = tmp_path / "source-assets"
+    source_assets.mkdir()
+    image_path = source_assets / "image.png"
+    Image.new("RGB", (1200, 1200), "black").save(image_path)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20"><image href="source-assets/image.png" '
+            'width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    packaged_assets = manifest.parent / "source-assets"
+    (packaged_assets / "image.png").unlink()
+    packaged_assets.rmdir()
+    try:
+        packaged_assets.symlink_to(source_assets, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+
+    assert verify_package(manifest.parent) == [
+        "linked asset 1 file is missing or is not a regular file: source-assets/image.png"
+    ]
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
