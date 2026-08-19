@@ -44,7 +44,7 @@ Blueprint file: [`render.yaml`](../render.yaml)
 2. Ensure a workspace that can create a **Starter** (or higher) web service with a **persistent disk**.
 3. Click **New → Blueprint**.
 4. Connect GitHub repo `ebyron357/LABELOS` if not already connected.
-5. Select branch **`feat/production-label-automation`** (until PR #41 is merged to `main`).
+5. Select branch **`main`**.
 6. Confirm Render detects `render.yaml` and the service name **`labelos-api`**.
 7. When prompted for `LABELOS_API_TOKEN`, paste a strong secret (generation below). Do not leave it blank.
 8. Apply / create the Blueprint and wait until the deploy status is **Live**.

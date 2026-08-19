@@ -13,7 +13,7 @@ Python 3.10 or newer is required.
 
 ```bash
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python -m labelos doctor --json
 ```
 
 `doctor` must show Pillow, PyMuPDF, and ZXing-C++ as available. Callas pdfToolbox is
@@ -25,7 +25,7 @@ expected. Do not treat it as a pass.
 1. **Install** LABELOS as above.
 2. **Prepare artwork** as SVG, PNG, or single-page PDF. Artwork size must include bleed.
 3. **Create a label spec** JSON file. Start from [`examples/label.json`](examples/label.json).
-4. **Validate:** `labelos validate examples/label.json --json`
+4. **Validate:** `python -m labelos validate examples/label.json --json`
 5. **Interpret errors.** Each issue has a `code` and `message`. See [Error codes](#error-codes).
 6. **Fix the artwork or spec.** Do not package a failing report.
 7. **Validate again** until the report shows `"passed": true`.
@@ -76,10 +76,10 @@ codes must decode to an expected string.
 
 | Command | Purpose |
 | --- | --- |
-| `labelos validate CONFIG [--json]` | Validate artwork and print a report |
-| `labelos package CONFIG DESTINATION [--json]` | Validate, then write a release package |
-| `labelos verify-package DESTINATION [--json]` | Check package checksums, paths, and passing status |
-| `labelos doctor [--json]` | Report required and optional tools |
+| `python -m labelos validate CONFIG [--json]` | Validate artwork and print a report |
+| `python -m labelos package CONFIG DESTINATION [--json]` | Validate, then write a release package |
+| `python -m labelos verify-package DESTINATION [--json]` | Check package checksums, paths, and passing status |
+| `python -m labelos doctor [--json]` | Report required and optional tools |
 
 `package` refuses to write over an existing destination and refuses failed reports.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
@@ -97,7 +97,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `SVG_DIMENSIONS_MISSING` | SVG width/height must use mm, cm, in, or pt |
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
-| `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` / `SVG_LINKED_IMAGE_DPI_TOO_LOW` | Embedded or safe local linked SVG raster is below `min_dpi` |
+| `SVG_RASTER_INSPECTION_FAILED` | SVG raster cannot be decoded or its linked path is unsafe, remote, missing, or outside the artwork directory |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
