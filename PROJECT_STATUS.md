@@ -89,7 +89,8 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-19 from branch `cursor/label-production-system-readiness-2a48`:
+Verified on 2026-08-19 from implementation commit `41f698d` on branch
+`cursor/label-production-system-readiness-2a48`:
 
 ```text
 python -m pytest -q                      # 62 passed (one FastAPI/httpx deprecation warning)
