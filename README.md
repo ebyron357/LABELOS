@@ -20,6 +20,9 @@ labelos doctor --json
 reported as `SKIPPED_NOT_CONFIGURED` until a real licensed adapter exists. That is
 expected. Do not treat it as a pass.
 
+If the installed `labelos` script directory is not on your `PATH`, use the equivalent
+path-independent form: `python -m labelos doctor --json`.
+
 ## Operator workflow
 
 1. **Install** LABELOS as above.
@@ -83,7 +86,10 @@ codes must decode to an expected string.
 
 `package` refuses to write over an existing destination and refuses failed reports.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
-byte-count mismatches, and reports that do not record a pass.
+byte-count mismatches, and reports that do not record a pass. For SVG artwork,
+local linked raster files are inspected for effective DPI and copied into the package
+at their original relative paths; remote, absolute, traversal, missing, and symlink
+references are rejected.
 
 ## Error codes
 
@@ -98,6 +104,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | SVG image is not a readable local embedded or linked raster |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
