@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe relative regular files are DPI-checked, release-packaged, and checksum-verified; remote, absolute, traversal, missing, and symlink references fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,10 +89,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-19 from branch `cursor/label-production-system-readiness-e18d`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 61 passed
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -106,3 +106,6 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+Linked SVG assets are recorded in release manifest schema 2 and stored under
+`assets/`. Package verification remains compatible with schema 1 release packages.
