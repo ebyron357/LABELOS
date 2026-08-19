@@ -536,6 +536,66 @@ def test_pdf_embedded_image_dpi_accepts_high_resolution_artwork(tmp_path):
     assert report.metadata["pdf"]["embedded_image_dpi"] == [600.0]
 
 
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    assets = tmp_path / "images"
+    assets.mkdir()
+    linked_image = assets / "photo.png"
+    Image.new("RGB", (600, 600), "black").save(linked_image)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm">'
+            '<image href="images/photo.png" width="25.4mm" height="25.4mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_assets"] == [
+        {
+            "file": "images/photo.png",
+            "sha256": hashlib.sha256(linked_image.read_bytes()).hexdigest(),
+            "bytes": linked_image.stat().st_size,
+        }
+    ]
+    package = create_package(spec, report, tmp_path / "release")
+    manifest = json.loads(package.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 2
+    assert manifest["linked_assets"]["images/photo.png"]["file"] == "images/photo.png"
+    assert (tmp_path / "release" / "images" / "photo.png").read_bytes() == linked_image.read_bytes()
+    assert verify_package(tmp_path / "release") == []
+    (tmp_path / "release" / "images" / "photo.png").write_bytes(b"tampered")
+    assert any("linked_asset:images/photo.png checksum mismatch" in failure for failure in verify_package(tmp_path / "release"))
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["https://example.test/photo.png", "../photo.png", "images/photo.png?version=1", "images/photo.png#v1"],
+)
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm">'
+            f'<image href="{href}" width="25.4mm" height="25.4mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 1}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
 def test_cli_malformed_pdf_fails_closed(tmp_path, capsys):
     artwork = tmp_path / "broken.pdf"
     artwork.write_bytes(b"not a PDF")

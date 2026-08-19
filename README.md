@@ -85,6 +85,11 @@ codes must decode to an expected string.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
 
+SVG `<image>` elements may embed a raster as a data URI or link to a local relative
+file. Linked rasters are decoded and checked for effective DPI, then retained in the
+release package and checksum-verified. Remote URLs, query strings/fragments, traversal,
+missing files, and symbolic links are rejected.
+
 ## Error codes
 
 | Code | Meaning |
@@ -98,6 +103,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_EMBEDDED_IMAGE_INSPECTION_FAILED` | A placed SVG raster is missing, unsafe, malformed, or cannot be decoded |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
