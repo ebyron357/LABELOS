@@ -85,6 +85,14 @@ codes must decode to an expected string.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
 
+### Linked SVG raster files
+
+SVG `<image>` elements may use embedded `data:image/...` payloads or local relative
+raster paths such as `assets/barcode.png`. Linked files must be regular files beneath
+the SVG's directory; remote URLs, absolute paths, traversal, and symlinks fail closed.
+LABELOS checks their effective placed DPI, copies them into the release package at the
+same relative path, and verifies their checksums.
+
 ## Error codes
 
 | Code | Meaning |
@@ -98,6 +106,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | Linked SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | Linked SVG file is remote, unsafe, unreadable, or not a raster |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
