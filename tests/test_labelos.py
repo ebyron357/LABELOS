@@ -467,6 +467,54 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    images = tmp_path / "images"
+    images.mkdir()
+    linked_image = images / "photo.png"
+    Image.new("RGB", (1200, 600), "white").save(linked_image)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" '
+            'viewBox="0 0 100 50"><image href="images/photo.png" width="100" height="50"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"] == [{"index": 1, "file": "images/photo.png"}]
+    manifest = create_package(spec, report, tmp_path / "release")
+    assert (manifest.parent / "images" / "photo.png").read_bytes() == linked_image.read_bytes()
+    assert not verify_package(manifest.parent)
+    packaged_image = manifest.parent / "images" / "photo.png"
+    packaged_image.write_bytes(b"x" * packaged_image.stat().st_size)
+    assert verify_package(manifest.parent) == ["linked asset 1 checksum mismatch: images/photo.png"]
+
+
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path):
+    artwork = tmp_path / "unsafe-linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" '
+            'viewBox="0 0 100 50"><image href="../outside.png" width="100" height="50"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     value = "LABELOS-PDF-12345"
     barcode_path = Path(
