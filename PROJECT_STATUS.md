@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative files are decoded, effective-DPI checked, copied into release packages, and checksummed; remote, absolute, traversal, query/fragment, missing, and symlink paths fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,20 +89,27 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-19 from branch `cursor/label-production-system-readiness-6901`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 64 passed; one upstream FastAPI/Starlette deprecation warning
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+python -m build                          # sdist and wheel in dist/; no package-discovery warning
+python -m labelos doctor --json          # required readers available; Callas SKIPPED_NOT_CONFIGURED
+python -m labelos validate examples/label.json --json          # PASS
+python -m labelos validate examples/failing-label.json --json  # expected REQUIRED_COPY_MISSING
+python -m labelos package examples/label.json /tmp/labelos-e2e-release --json
+python -m labelos verify-package /tmp/labelos-e2e-release --json  # PASS
 ```
 
-Callas pdfToolbox remains unavailable and is never reported as PASS.
+The complete CLI workflow generated and verified `/tmp/labelos-e2e-release/manifest.json`.
+Linked-SVG regression coverage verifies passing and under-resolution rasters, unsafe
+href rejection, self-contained dependency packaging, checksum verification, and
+schema-1 package verification compatibility.
+
+Callas pdfToolbox remains unavailable and is never reported as PASS. The remaining
+blockers are genuinely external or human-owned: a Callas license/profile, printer
+production profile, approved Illustrator workstation/template, and a product decision
+on OCR for outlined or raster-only required copy.
