@@ -264,6 +264,16 @@ def test_package_contains_verified_manifest(tmp_path):
     assert verify_package(manifest.parent) == ["artwork checksum mismatch: passing-label.svg"]
 
 
+def test_verify_package_accepts_existing_schema_one_package(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    data.pop("linked_assets")
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert not verify_package(manifest.parent)
+
+
 def test_package_refuses_failed_report(tmp_path):
     spec = LabelSpec.from_dict(
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50},
@@ -464,6 +474,81 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
 
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
+    assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_validated_packaged_and_verified(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "label-image.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/label-image.png" width="50" height="50"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_assets"] == ["assets/label-image.png"]
+    assert (manifest.parent / "assets" / "label-image.png").is_file()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "assets" / "label-image.png").write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked asset checksum mismatch: assets/label-image.png",
+        "linked asset byte count mismatch: assets/label-image.png",
+    ]
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["../outside.png", "/absolute.png", "https://example.test/image.png", "missing.png"],
+)
+def test_unsafe_or_missing_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            f'viewBox="0 0 100 100"><image href="{href}" width="50" height="50"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_low_resolution_linked_svg_raster_fails(tmp_path):
+    raster = tmp_path / "low.png"
+    Image.new("RGB", (100, 100), "black").save(raster)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="low.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 

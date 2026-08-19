@@ -83,7 +83,11 @@ codes must decode to an expected string.
 
 `package` refuses to write over an existing destination and refuses failed reports.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
-byte-count mismatches, and reports that do not record a pass.
+byte-count mismatches, and reports that do not record a pass. SVG artwork may use
+linked raster images only when they are regular relative files beneath the SVG's
+directory. Their effective DPI is validated and passing assets are bundled and
+checksummed in the release package. Remote, absolute, traversal, missing, and
+symlink image references fail validation.
 
 ## Error codes
 
