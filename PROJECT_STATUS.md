@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: the current `main` lineage.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (local relative regular files inside the SVG directory are DPI-checked, checksummed, packaged, and re-verified; remote, absolute, traversal, missing, unreadable, and symlink paths fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,10 +89,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-19 from the current `main` lineage:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 63 passed
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -105,4 +105,16 @@ labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
-Callas pdfToolbox remains unavailable and is never reported as PASS.
+Linked SVG release packages use manifest schema version 2 and include every validated local
+raster at its original relative path. Callas pdfToolbox remains unavailable and is never
+reported as PASS.
+
+## Next autonomous run
+
+The canonical CLI path has no known P0/P1 software defects. Re-run the full verification
+record above before declaring a release after dependency upgrades. Remaining blockers are
+human or external: Callas licensing/profile, printer-approved prepress specifications,
+licensed Illustrator plus an approved template, and an OCR product decision for outlined or
+raster-only required copy. If the optional HTTP job API is promoted to production scope, take
+issue #43 next: require package verification before approval and bind approval to packaged
+bytes rather than pre-package artwork.
