@@ -154,18 +154,43 @@ def _svg_length_mm(value: str | None) -> float | None:
     return number * {"mm": 1, "cm": 10, "in": 25.4, "pt": MM_PER_POINT}[unit]
 
 
-def _svg_embedded_raster_data(href: str) -> bytes | None:
+def _svg_embedded_raster_data(href: str, artwork: Path) -> tuple[bytes, str] | None:
+    """Return raster bytes and their reportable source, rejecting unsafe linked files."""
+    if not href.startswith("data:"):
+        linked_asset = _safe_svg_linked_asset(href, artwork)
+        if linked_asset is None:
+            raise ValueError("linked image must be a safe relative regular file")
+        return linked_asset.read_bytes(), linked_asset.relative_to(artwork.parent).as_posix()
     if not href.startswith("data:image/"):
-        return None
+        raise ValueError("image data URI must use an image media type")
     try:
         header, payload = href.split(",", 1)
         if header.lower().startswith("data:image/svg"):
             return None
         if ";base64" in header.lower():
-            return base64.b64decode(payload, validate=True)
-        return unquote_to_bytes(payload)
+            return base64.b64decode(payload, validate=True), "data-uri"
+        return unquote_to_bytes(payload), "data-uri"
     except (ValueError, base64.binascii.Error) as error:
         raise ValueError(f"invalid data URI: {error}") from error
+
+
+def _safe_svg_linked_asset(href: str, artwork: Path) -> Path | None:
+    """Resolve an SVG-linked image only when it stays below the artwork directory."""
+    if not href or "://" in href or href.startswith(("/", "\\")):
+        return None
+    path = Path(href)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        return None
+    candidate = artwork.parent / path
+    try:
+        resolved = candidate.resolve(strict=True)
+        root = artwork.parent.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    if candidate.is_symlink() or not resolved.is_file() or resolved.is_symlink():
+        return None
+    return resolved
 
 
 def _svg_image_display_mm(
@@ -230,18 +255,21 @@ def _validate_svg_embedded_rasters(
         return
     report.checks.append("svg-embedded-raster-resolution")
     inspected_images = []
+    linked_assets = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
             report.add("SVG_EMBEDDED_IMAGE_INSPECTION_FAILED", "error", f"Embedded image {index} has no href")
             continue
         try:
-            data = _svg_embedded_raster_data(href)
-            if data is None:
+            raster_source = _svg_embedded_raster_data(href, spec.artwork)
+            if raster_source is None:
                 continue
+            data, source = raster_source
             from PIL import Image
 
             with Image.open(BytesIO(data)) as raster:
+                raster.load()
                 pixels = raster.size
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
@@ -254,8 +282,11 @@ def _validate_svg_embedded_rasters(
                     "pixels": {"width": pixels[0], "height": pixels[1]},
                     "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
                     "dpi": round(effective_dpi, 2),
+                    "source": source,
                 }
             )
+            if source != "data-uri":
+                linked_assets.append(source)
             if effective_dpi < spec.min_dpi:
                 report.add(
                     "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
@@ -271,6 +302,8 @@ def _validate_svg_embedded_rasters(
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
+    if linked_assets:
+        report.metadata["svg_linked_assets"] = linked_assets
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:

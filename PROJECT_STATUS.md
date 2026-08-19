@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe relative regular files below the artwork directory are DPI-checked, packaged, and checksummed; remote, absolute, traversal, missing, and symlink sources fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -88,6 +88,24 @@ Keep `main` (#6 and earlier) as history. `feat/production-label-automation` rema
 optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
+
+Verified on 2026-08-19 from branch `cursor/label-production-system-readiness-8ecd`:
+
+```text
+python3 -m pytest -q                      # 63 passed (one upstream FastAPI/httpx deprecation warning)
+python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                      # passed
+python3 -m build                          # sdist and wheel in dist/
+python3 -m labelos doctor --json          # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json /tmp/labelos-cli-release --json
+python3 -m labelos verify-package /tmp/labelos-cli-release --json  # PASS
+```
+
+This run added fail-closed validation, package inclusion, and integrity verification
+for linked SVG raster assets, plus the `python -m labelos` CLI entry point.
 
 Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
 
