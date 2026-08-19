@@ -13,12 +13,15 @@ Python 3.10 or newer is required.
 
 ```bash
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python -m labelos doctor --json
 ```
 
 `doctor` must show Pillow, PyMuPDF, and ZXing-C++ as available. Callas pdfToolbox is
 reported as `SKIPPED_NOT_CONFIGURED` until a real licensed adapter exists. That is
 expected. Do not treat it as a pass.
+
+All commands below work as `python -m labelos …`; the installed `labelos …` script is
+equivalent when its scripts directory is on `PATH`.
 
 ## Operator workflow
 

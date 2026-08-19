@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe relative regular files below the artwork directory are DPI-checked, bundled, and integrity-verified; remote, absolute, traversal, missing, and symlink sources fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,20 +89,27 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-08-19 from branch `cursor/label-production-system-readiness-5052`:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 61 passed (one upstream FastAPI/Starlette deprecation warning)
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
 python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python -m labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
+python -m labelos validate examples/label.json --json          # PASS
+python -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Continuation record
+
+2026-08-19: linked SVG raster asset validation and release-package bundling were added
+with manifest schema 2. Package verification remains backward compatible with schema 1.
+The full verification command set passed on this branch; it produced `dist/` packages
+and `/tmp/labelos-e2e-release`. Callas remains `SKIPPED_NOT_CONFIGURED`.
