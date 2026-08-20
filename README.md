@@ -20,6 +20,9 @@ labelos doctor --json
 reported as `SKIPPED_NOT_CONFIGURED` until a real licensed adapter exists. That is
 expected. Do not treat it as a pass.
 
+The console command and `python -m labelos` are equivalent; use the module form when
+the installed script directory is not on `PATH`.
+
 ## Operator workflow
 
 1. **Install** LABELOS as above.
@@ -81,7 +84,13 @@ codes must decode to an expected string.
 | `labelos verify-package DESTINATION [--json]` | Check package checksums, paths, and passing status |
 | `labelos doctor [--json]` | Report required and optional tools |
 
-`package` refuses to write over an existing destination and refuses failed reports.
+For SVG artwork, local linked raster files are permitted only below the SVG directory.
+They are validated at their effective placed DPI, copied into the release package, and
+recorded in its manifest. URLs, fragments, query strings, traversal, missing files, and
+symlinked raster references fail closed.
+
+`package` refuses to write over an existing destination, refuses failed reports, and
+refuses linked SVG assets changed after validation.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
 
@@ -98,6 +107,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | A local linked SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | A linked SVG raster is unsafe, missing, malformed, or unreadable |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |

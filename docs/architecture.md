@@ -11,7 +11,7 @@ Label spec JSON + artwork (SVG / PNG / PDF)
   → structured report (pass or fail-closed errors)
   → labelos package   (refuses failed reports)
   → labelos verify-package
-  → release directory (artwork + report + spec + SHA-256 manifest)
+→ release directory (artwork + linked SVG rasters + report + spec + SHA-256 manifest)
 ```
 
 Callas pdfToolbox is an optional commercial adapter. Until it is licensed and configured,
@@ -34,3 +34,7 @@ A release package is created only when validation has no error-severity issues.
 Verification fails if the manifest is malformed, files are missing or not regular files,
 paths escape the package directory, checksums or byte counts disagree, or the stored
 report does not record a pass.
+
+SVG linked raster files must be local, relative, non-symlinked files beneath the SVG
+directory. LABELOS validates their effective placed DPI, captures their digest in the
+report, copies them into the package, and verifies them through the manifest.
