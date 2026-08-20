@@ -19,7 +19,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Trim/bleed expectations | **AVAILABLE NOW** |
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
-| Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
+| Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI/local linked images and PDF placed images) |
 | Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (local, non-symlink files under the artwork directory are DPI-checked and packaged with checksums) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -106,3 +106,30 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Latest verification record
+
+Verified on 2026-08-20, implementation commit `3fc35e5`
+(`fix: validate and package linked SVG rasters`):
+
+```text
+python3 -m labelos doctor --json                         # PASS; Pillow, PyMuPDF, ZXing-C++ available
+python3 -m labelos validate examples/label.json --json   # PASS
+python3 -m labelos validate examples/failing-label.json --json  # expected exit 1, REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json /tmp/labelos-e2e-release --json  # PASS
+python3 -m labelos verify-package /tmp/labelos-e2e-release --json               # PASS
+python3 -m pytest -q                                    # 62 passed; 1 upstream FastAPI/Starlette deprecation warning
+python3 -m ruff check .                                  # PASS
+python3 -m compileall -q labelos illustrator_bridge tests # PASS
+python3 -m pip check                                     # PASS
+python3 -m build                                         # PASS; sdist + wheel in dist/
+```
+
+The linked-SVG regression suite covers low DPI, successful package inclusion and
+checksum verification, tampering, missing files, path traversal, and URL references.
+Callas remains `SKIPPED_NOT_CONFIGURED`; no commercial preflight result was claimed.
+
+## Next autonomous run
+
+Prioritize only actionable software gaps outside the documented external/human blockers.
+Re-run the full verification record before declaring the current operator path complete.
