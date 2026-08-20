@@ -549,3 +549,73 @@ def test_cli_malformed_pdf_fails_closed(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["passed"] is False
     assert report["issues"][0]["code"] == "PDF_INVALID"
+
+
+def _write_svg_with_linked_image(artwork: Path, href: str) -> None:
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25.4mm" height="25.4mm">'
+            f'<image href="{href}" width="25.4mm" height="25.4mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_linked_svg_raster_is_dpi_checked_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "logo.png"
+    Image.new("RGB", (600, 600), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    _write_svg_with_linked_image(artwork, "assets/logo.png")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/logo.png"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
+    assert payload["linked_assets"][0]["file"] == "assets/logo.png"
+    assert (tmp_path / "release" / "assets" / "logo.png").is_file()
+    assert verify_package(tmp_path / "release") == []
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "../outside.png",
+        "/absolute.png",
+        "https://example.test/logo.png",
+        "assets/logo.png?version=1",
+        "assets/logo.png#fragment",
+    ],
+)
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "label.svg"
+    _write_svg_with_linked_image(artwork, href)
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_symlinked_svg_raster_fails_closed(tmp_path):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (600, 600), "black").save(source)
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "logo.png").symlink_to(source)
+    artwork = tmp_path / "label.svg"
+    _write_svg_with_linked_image(artwork, "assets/logo.png")
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25.4, "height_mm": 25.4}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
