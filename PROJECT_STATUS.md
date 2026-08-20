@@ -107,9 +107,29 @@ labelos verify-package storage/demo-release          # PASS
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
 
+## Latest verification record
+
+Verified on 2026-08-20, implementation commit `3fc35e5`
+(`fix: validate and package linked SVG rasters`):
+
+```text
+python3 -m labelos doctor --json                         # PASS; Pillow, PyMuPDF, ZXing-C++ available
+python3 -m labelos validate examples/label.json --json   # PASS
+python3 -m labelos validate examples/failing-label.json --json  # expected exit 1, REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json /tmp/labelos-e2e-release --json  # PASS
+python3 -m labelos verify-package /tmp/labelos-e2e-release --json               # PASS
+python3 -m pytest -q                                    # 62 passed; 1 upstream FastAPI/Starlette deprecation warning
+python3 -m ruff check .                                  # PASS
+python3 -m compileall -q labelos illustrator_bridge tests # PASS
+python3 -m pip check                                     # PASS
+python3 -m build                                         # PASS; sdist + wheel in dist/
+```
+
+The linked-SVG regression suite covers low DPI, successful package inclusion and
+checksum verification, tampering, missing files, path traversal, and URL references.
+Callas remains `SKIPPED_NOT_CONFIGURED`; no commercial preflight result was claimed.
+
 ## Next autonomous run
 
-The linked-SVG raster validation and package-integrity gap was closed after the above
-record. The next run should execute the full verification suite, update this record
-with its exact results and commit SHA, then prioritize only actionable gaps that remain
-outside the documented external/human blockers.
+Prioritize only actionable software gaps outside the documented external/human blockers.
+Re-run the full verification record before declaring the current operator path complete.
