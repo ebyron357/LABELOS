@@ -19,7 +19,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Trim/bleed expectations | **AVAILABLE NOW** |
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
-| Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
+| Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI/local linked images and PDF placed images) |
 | Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (local, non-symlink files under the artwork directory are DPI-checked and packaged with checksums) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -106,3 +106,10 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Next autonomous run
+
+The linked-SVG raster validation and package-integrity gap was closed after the above
+record. The next run should execute the full verification suite, update this record
+with its exact results and commit SHA, then prioritize only actionable gaps that remain
+outside the documented external/human blockers.

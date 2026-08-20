@@ -9,7 +9,7 @@ import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote, unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
@@ -168,6 +168,28 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def _svg_linked_raster_path(href: str, artwork: Path) -> tuple[Path, str]:
+    """Resolve a local SVG image reference without allowing it to escape the artwork folder."""
+
+    parsed = urlsplit(href)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        raise ValueError("linked image href must be a local path without a URL, query, or fragment")
+    if not parsed.path:
+        raise ValueError("linked image href must name a local file")
+    root = artwork.parent.resolve()
+    candidate = artwork.parent / unquote(parsed.path)
+    if candidate.is_symlink() or any(parent.is_symlink() for parent in candidate.parents if parent != root):
+        raise ValueError("linked image href must not use a symlink")
+    path = candidate.resolve()
+    try:
+        relative = path.relative_to(root)
+    except ValueError as error:
+        raise ValueError("linked image href escapes the artwork directory") from error
+    if not path.is_file():
+        raise ValueError("linked image file is missing or is not a regular file")
+    return path, relative.as_posix()
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -237,12 +259,17 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
+            linked_file = None
             if data is None:
-                continue
+                if href.lower().startswith("data:image/svg"):
+                    continue
+                path, linked_file = _svg_linked_raster_path(href, spec.artwork)
+                data = path.read_bytes()
             from PIL import Image
 
             with Image.open(BytesIO(data)) as raster:
                 pixels = raster.size
+                raster.load()
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
                 pixels[0] / (display_width / 25.4),
@@ -256,6 +283,8 @@ def _validate_svg_embedded_rasters(
                     "dpi": round(effective_dpi, 2),
                 }
             )
+            if linked_file is not None:
+                inspected_images[-1]["linked_file"] = linked_file
             if effective_dpi < spec.min_dpi:
                 report.add(
                     "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
