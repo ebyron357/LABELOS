@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 import struct
 import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
@@ -168,6 +169,58 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def svg_linked_raster_assets(artwork: Path) -> list[tuple[str, Path]]:
+    """Return safe local raster files referenced by an SVG.
+
+    Release packages retain relative SVG links, so linked files must stay below the
+    artwork directory and cannot traverse it or resolve through symlinks.
+    """
+
+    text = artwork.read_text(encoding="utf-8", errors="replace")
+    if _SVG_DOCTYPE_RE.search(text):
+        raise ValueError("SVG contains a DOCTYPE or entity declaration")
+    try:
+        root = ElementTree.fromstring(text)
+    except ElementTree.ParseError as error:
+        raise ValueError(f"SVG is not valid XML: {error}") from error
+
+    root_directory = artwork.parent.resolve()
+    linked: list[tuple[str, Path]] = []
+    for index, image in enumerate(
+        (element for element in root.iter() if _local_name(element.tag) == "image"), start=1
+    ):
+        href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
+        if href is None or href.startswith("data:"):
+            continue
+        parsed = urlsplit(href)
+        if (
+            parsed.scheme
+            or parsed.netloc
+            or parsed.query
+            or parsed.fragment
+            or not parsed.path
+            or "\\" in parsed.path
+        ):
+            raise ValueError(f"linked image {index} must use a plain local relative href")
+        relative = Path(parsed.path)
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            raise ValueError(f"linked image {index} path is unsafe")
+        candidate = artwork.parent / relative
+        try:
+            candidate.resolve().relative_to(root_directory)
+        except ValueError as error:
+            raise ValueError(f"linked image {index} escapes the artwork directory") from error
+        current = root_directory
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                raise ValueError(f"linked image {index} uses a symlink")
+        if not candidate.is_file():
+            raise ValueError(f"linked image {index} does not exist or is not a regular file")
+        linked.append((parsed.path, candidate))
+    return linked
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -239,9 +292,9 @@ def _validate_svg_embedded_rasters(
             data = _svg_embedded_raster_data(href)
             if data is None:
                 continue
-            from PIL import Image
+            from PIL import Image as PillowImage
 
-            with Image.open(BytesIO(data)) as raster:
+            with PillowImage.open(BytesIO(data)) as raster:
                 pixels = raster.size
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
@@ -271,6 +324,64 @@ def _validate_svg_embedded_rasters(
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
+
+    try:
+        linked_assets = dict(svg_linked_raster_assets(spec.artwork))
+    except ValueError as error:
+        report.add("SVG_LINKED_IMAGE_INSPECTION_FAILED", "error", str(error))
+        return
+    if not linked_assets:
+        return
+    report.checks.append("svg-linked-raster-resolution")
+    inspected_linked_images = []
+    for index, image in enumerate(images, start=1):
+        href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
+        if href not in linked_assets:
+            continue
+        try:
+            from PIL import Image as PillowImage
+
+            with PillowImage.open(linked_assets[href]) as raster:
+                raster.load()
+                pixels = raster.size
+            display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
+            effective_dpi = min(
+                pixels[0] / (display_width / 25.4),
+                pixels[1] / (display_height / 25.4),
+            )
+            inspected_linked_images.append(
+                {
+                    "index": index,
+                    "href": href,
+                    "sha256": _sha256_file(linked_assets[href]),
+                    "pixels": {"width": pixels[0], "height": pixels[1]},
+                    "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
+                    "dpi": round(effective_dpi, 2),
+                }
+            )
+            if effective_dpi < spec.min_dpi:
+                report.add(
+                    "SVG_LINKED_IMAGE_DPI_TOO_LOW",
+                    "error",
+                    f"Linked image {index} has effective resolution {effective_dpi:.1f} DPI; "
+                    f"minimum is {spec.min_dpi} DPI",
+                )
+        except (OSError, ValueError) as error:
+            report.add(
+                "SVG_LINKED_IMAGE_INSPECTION_FAILED",
+                "error",
+                f"Could not inspect linked image {index}: {error}",
+            )
+    if inspected_linked_images:
+        report.metadata["svg_linked_images"] = inspected_linked_images
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:
