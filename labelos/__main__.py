@@ -1,6 +1,6 @@
-"""Run the LABELOS operator CLI with ``python -m labelos``."""
+"""Run the operator CLI with ``python -m labelos``."""
 
-from .cli import main
+from labelos.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

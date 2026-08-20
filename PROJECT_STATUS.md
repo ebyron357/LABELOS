@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative paths are decoded, effective-DPI validated, packaged, checksummed, and reverified; remote, absolute, traversal, query/fragment, missing, and symlink paths fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -92,36 +92,22 @@ optional API/bridge lineage; it is not the operator-facing product.
 Verified on 2026-09-01 from the release-readiness branch:
 
 ```text
-python3 -m pytest -q                 # 57 passed; one upstream Starlette deprecation warning
-python3 -m ruff check .              # passed
-python3 -m compileall -q labelos illustrator_bridge tests  # passed
-python3 -m pip check                 # passed
-python3 -m build --outdir /tmp/labelos-build               # sdist + wheel passed, no package warning
-python3 -m labelos doctor --json                         # required readers available; Callas SKIPPED_NOT_CONFIGURED
-python3 -m labelos validate examples/label.json --json   # PASS
-python3 -m labelos validate examples/failing-label.json --json  # expected FAIL
-python3 -m labelos package examples/label.json /tmp/labelos-cli-release --json
-python3 -m labelos verify-package /tmp/labelos-cli-release --json  # PASS
-```
-
-The module operator entry point (`python -m labelos`) is covered by a subprocess
-regression test, and the built wheel was checked for both that entry point and the
-Illustrator generation script.
-
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
-
-```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python3 -m pytest -q                     # 63 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m ruff check .                  # passed
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check
+python3 -m build                         # sdist and wheel in dist/
+python3 -m labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json storage/demo-release
+python3 -m labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
+
+SVG release packages with linked rasters use manifest schema 2. The referenced
+relative paths and checksums are included in the package and revalidated; schema-1
+packages remain verifiable. Packaging refuses artwork or linked raster assets changed
+after validation.
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
