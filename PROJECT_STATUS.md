@@ -19,7 +19,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Trim/bleed expectations | **AVAILABLE NOW** |
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
-| Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
+| Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI and safe local linked images, plus PDF placed images) |
 | Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
@@ -32,7 +32,6 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -106,3 +105,23 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+Verified on 2026-08-20:
+
+```text
+python3 -m pytest -q                                      # 64 passed
+python3 -m ruff check .                                   # passed
+python3 -m compileall -q labelos illustrator_bridge tests # passed
+python3 -m pip check                                      # passed
+python3 -m build                                          # sdist + wheel passed
+python3 -m labelos doctor --json                          # required tools available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json    # PASS
+python3 -m labelos validate examples/failing-label.json --json # REQUIRED_COPY_MISSING
+python3 -m labelos package ... && python3 -m labelos verify-package ... # PASS
+```
+
+Safe local linked SVG raster files are decoded and effective-DPI checked. Package schema
+version 2 includes these assets with checksums while `verify-package` remains compatible
+with existing schema-1 packages. URLs, fragments, traversal paths, missing files, and
+symlinks fail closed; packaging refuses a linked asset that changes after validation.
+The CLI also has a supported `python -m labelos` entrypoint.
