@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Allow importing labelos when run from repo root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -73,6 +73,15 @@ class GenerateRequest(BaseModel):
     output_dir: str | None = None
     export_formats: list[str] = Field(default_factory=lambda: ["pdf"])
     dry_run: bool = False
+
+    @field_validator("export_formats")
+    @classmethod
+    def validate_export_formats(cls, formats: list[str]) -> list[str]:
+        allowed = {"pdf", "ai", "png"}
+        normalized = [value.lower() for value in formats]
+        if not normalized or any(value not in allowed for value in normalized):
+            raise ValueError("export_formats must contain only pdf, ai, or png")
+        return normalized
 
 
 def illustrator_available() -> dict[str, Any]:
@@ -176,6 +185,13 @@ def run_illustrator_job(payload: dict[str, Any]) -> dict[str, Any]:
                 code=result.get("code", "ARTWORK_GENERATION_ERROR"),
                 category=ARTWORK_GENERATION_ERROR,
                 details=result,
+            )
+        outputs = result.get("outputs")
+        if not isinstance(outputs, list) or not outputs:
+            raise LabelosException(
+                "Illustrator reported success without generated outputs",
+                code="ILLUSTRATOR_NO_OUTPUTS",
+                category=ARTWORK_GENERATION_ERROR,
             )
         return result
 
