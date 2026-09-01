@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: the current mainline release engine.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -88,6 +88,25 @@ Keep `main` (#6 and earlier) as history. `feat/production-label-automation` rema
 optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
+
+Verified on 2026-09-01 from the release-readiness branch:
+
+```text
+python3 -m pytest -q                 # 57 passed; one upstream Starlette deprecation warning
+python3 -m ruff check .              # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                 # passed
+python3 -m build --outdir /tmp/labelos-build               # sdist + wheel passed, no package warning
+python3 -m labelos doctor --json                         # required readers available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json   # PASS
+python3 -m labelos validate examples/failing-label.json --json  # expected FAIL
+python3 -m labelos package examples/label.json /tmp/labelos-cli-release --json
+python3 -m labelos verify-package /tmp/labelos-cli-release --json  # PASS
+```
+
+The module operator entry point (`python -m labelos`) is covered by a subprocess
+regression test, and the built wheel was checked for both that entry point and the
+Illustrator generation script.
 
 Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
 
