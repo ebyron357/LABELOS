@@ -118,4 +118,7 @@ bypass attempt.
 The Render Blueprint parses as YAML and was checked to deploy `main` only after CI checks
 pass. Render CLI schema validation is unavailable in this environment.
 
+The production Docker image was not built in this environment because the Docker CLI is
+unavailable. This is an environment-tool limitation, not a successful container check.
+
 Callas pdfToolbox remains unavailable and is never reported as PASS.
