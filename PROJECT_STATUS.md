@@ -110,4 +110,9 @@ relative paths and checksums are included in the package and revalidated; schema
 packages remain verifiable. Packaging refuses artwork or linked raster assets changed
 after validation.
 
+API job releases require a completed package verification before approval, bind approval
+to the checksum of the artwork revalidated during packaging, and revalidate the package
+immediately before release. The API regression suite covers the approval/verification
+bypass attempt.
+
 Callas pdfToolbox remains unavailable and is never reported as PASS.

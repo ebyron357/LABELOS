@@ -226,6 +226,19 @@ def test_job_package_verify_approve_release(api_env):
 
     packaged = client.post("/package", headers=auth(token), json={"job_id": job_id})
     assert packaged.status_code == 200
+    job = service.jobs.get(job_id)
+    unverified_approval = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={
+            "approver": "qa.operator",
+            "approved": True,
+            "artwork_checksum": job["artwork_checksum"],
+        },
+    )
+    assert unverified_approval.status_code == 400
+    assert unverified_approval.json()["result"]["error"]["code"] == "APPROVAL_STATE"
+
     verified = client.post("/verify-package", headers=auth(token), json={"job_id": job_id})
     assert verified.status_code == 200
 
