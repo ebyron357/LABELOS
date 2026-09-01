@@ -383,6 +383,9 @@ class ProductionService:
                 http_status=409,
             )
 
+        # Approval must bind to the exact artwork that was revalidated and packaged,
+        # not the source file checksum captured when the job was first created.
+        job["artwork_checksum"] = sha256_file(spec.artwork)
         extras = {
             "product-data.json": job.get("product_data") or {},
             "config.json": job.get("config") or {},
@@ -472,7 +475,6 @@ class ProductionService:
         job = self.jobs.get(job_id)
         if job["status"] not in {
             JobLifecycle.AWAITING_APPROVAL.value,
-            JobLifecycle.TECHNICALLY_VALIDATED.value,
         }:
             raise LabelosException(
                 f"Job status {job['status']} is not awaiting approval",
@@ -480,15 +482,13 @@ class ProductionService:
                 category=APPROVAL_ERROR,
             )
         expected = job.get("artwork_checksum")
-        if artwork_checksum is None:
-            artwork_checksum = expected
-        if not artwork_checksum:
+        if not expected or not artwork_checksum:
             raise LabelosException(
-                "Approval requires an artwork checksum",
+                "Approval requires the packaged artwork checksum",
                 code="APPROVAL_CHECKSUM_REQUIRED",
                 category=APPROVAL_ERROR,
             )
-        if expected and artwork_checksum != expected:
+        if artwork_checksum != expected:
             raise LabelosException(
                 "Approval checksum does not match the job artwork checksum",
                 code="APPROVAL_CHECKSUM_MISMATCH",
@@ -505,8 +505,6 @@ class ProductionService:
         job["approval_result"] = approval
         job["timestamps"]["approval_at"] = approval["timestamp"]
         if approved:
-            if job["status"] == JobLifecycle.TECHNICALLY_VALIDATED.value:
-                self.jobs.transition(job, JobLifecycle.AWAITING_APPROVAL)
             self.jobs.transition(job, JobLifecycle.APPROVED_FOR_PRODUCTION)
             job["final_status"] = JobLifecycle.APPROVED_FOR_PRODUCTION.value
         else:
@@ -529,8 +527,32 @@ class ProductionService:
                 code="RELEASE_PACKAGE_MISSING",
                 category=PACKAGE_ERROR,
             )
+        if not job.get("timestamps", {}).get("verified_at"):
+            raise LabelosException(
+                "Release requires a successful package verification",
+                code="RELEASE_VERIFICATION_REQUIRED",
+                category=PACKAGE_ERROR,
+            )
+        package_path = Path(job["package_path"])
+        manifest_path = package_path / "manifest.json"
+        verification_failures = verify_package(package_path)
+        if (
+            verification_failures
+            or not manifest_path.is_file()
+            or manifest_path.is_symlink()
+            or sha256_file(manifest_path) != job["package_checksum"]
+        ):
+            raise LabelosException(
+                "Release package changed or no longer passes verification",
+                code="RELEASE_VERIFICATION_REQUIRED",
+                category=PACKAGE_ERROR,
+            )
         approval = job.get("approval_result") or {}
-        if not approval.get("approved"):
+        if (
+            not approval.get("approved")
+            or not job.get("artwork_checksum")
+            or approval.get("artwork_checksum") != job["artwork_checksum"]
+        ):
             raise LabelosException(
                 "Release requires human approval bound to artwork checksum",
                 code="RELEASE_APPROVAL_MISSING",

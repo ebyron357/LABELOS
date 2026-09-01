@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: the current mainline release engine.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -32,11 +32,11 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative paths are decoded, effective-DPI validated, packaged, checksummed, and reverified; remote, absolute, traversal, query/fragment, missing, and symlink paths fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
-| HTTP API / n8n orchestration | **FUTURE** (code exists; not the operator path) |
+| HTTP API / n8n orchestration | **FUTURE** (code exists; not the operator path; Render Blueprint tracks `main` and deploys only after checks pass) |
 | Illustrator generation | **FUTURE** (workstation bridge exists; live COM requires Illustrator) |
 | Prompt-to-label generation | **FUTURE** |
 | Web UI / visual editing | **FUTURE** |
@@ -89,20 +89,40 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-01 from the release-readiness branch:
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python3 -m pytest -q                     # 66 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m ruff check .                  # passed
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check
+python3 -m build                         # sdist and wheel in dist/
+python3 -m labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json storage/demo-release
+python3 -m labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
+
+SVG release packages with linked rasters use manifest schema 2. The referenced
+relative paths and checksums are included in the package and revalidated; schema-1
+packages remain verifiable. Packaging refuses artwork or linked raster assets changed
+after validation.
+
+API job releases require a completed package verification before approval, bind approval
+to the checksum of the artwork revalidated during packaging, and revalidate the package
+immediately before release. The API regression suite covers the approval/verification
+bypass attempt.
+
+Illustrator generation rejects empty or unsupported export-format requests and a live
+Illustrator success result without outputs. The live workstation integration remains an
+external prerequisite.
+
+The Render Blueprint parses as YAML and was checked to deploy `main` only after CI checks
+pass. Render CLI schema validation is unavailable in this environment.
+
+The production Docker image was not built in this environment because the Docker CLI is
+unavailable. This is an environment-tool limitation, not a successful container check.
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
