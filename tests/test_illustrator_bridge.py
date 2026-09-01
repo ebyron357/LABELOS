@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from illustrator_bridge.server import create_bridge_app
+from illustrator_bridge.server import GenerateRequest, create_bridge_app
 
 
 @pytest.fixture()
@@ -51,6 +51,16 @@ def product_payload() -> dict:
         },
         "printer": {"profile": None},
     }
+
+
+@pytest.mark.parametrize("formats", [[], ["pfd"], ["pdf", "svg"]])
+def test_generate_request_rejects_invalid_export_formats(formats):
+    with pytest.raises(ValueError, match="export_formats"):
+        GenerateRequest(
+            product_data=product_payload(),
+            template_path="alternative-syrup.ai",
+            export_formats=formats,
+        )
 
 
 def test_bridge_health(bridge):
