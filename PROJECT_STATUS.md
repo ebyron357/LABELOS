@@ -92,7 +92,7 @@ optional API/bridge lineage; it is not the operator-facing product.
 Verified on 2026-09-01 from the release-readiness branch:
 
 ```text
-python3 -m pytest -q                     # 63 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m pytest -q                     # 66 passed (one upstream FastAPI/Starlette deprecation warning)
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests
 python3 -m pip check
@@ -114,6 +114,10 @@ API job releases require a completed package verification before approval, bind 
 to the checksum of the artwork revalidated during packaging, and revalidate the package
 immediately before release. The API regression suite covers the approval/verification
 bypass attempt.
+
+Illustrator generation rejects empty or unsupported export-format requests and a live
+Illustrator success result without outputs. The live workstation integration remains an
+external prerequisite.
 
 The Render Blueprint parses as YAML and was checked to deploy `main` only after CI checks
 pass. Render CLI schema validation is unavailable in this environment.
