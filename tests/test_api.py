@@ -243,6 +243,14 @@ def test_job_package_verify_approve_release(api_env):
     assert verified.status_code == 200
 
     job = service.jobs.get(job_id)
+    missing_checksum = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa.operator", "approved": True},
+    )
+    assert missing_checksum.status_code == 400
+    assert missing_checksum.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_REQUIRED"
+
     approve = client.post(
         f"/jobs/{job_id}/approve",
         headers=auth(token),

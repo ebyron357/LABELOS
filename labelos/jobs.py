@@ -482,15 +482,13 @@ class ProductionService:
                 category=APPROVAL_ERROR,
             )
         expected = job.get("artwork_checksum")
-        if artwork_checksum is None:
-            artwork_checksum = expected
-        if not artwork_checksum:
+        if not expected or not artwork_checksum:
             raise LabelosException(
-                "Approval requires an artwork checksum",
+                "Approval requires the packaged artwork checksum",
                 code="APPROVAL_CHECKSUM_REQUIRED",
                 category=APPROVAL_ERROR,
             )
-        if expected and artwork_checksum != expected:
+        if artwork_checksum != expected:
             raise LabelosException(
                 "Approval checksum does not match the job artwork checksum",
                 code="APPROVAL_CHECKSUM_MISMATCH",
@@ -550,7 +548,11 @@ class ProductionService:
                 category=PACKAGE_ERROR,
             )
         approval = job.get("approval_result") or {}
-        if not approval.get("approved"):
+        if (
+            not approval.get("approved")
+            or not job.get("artwork_checksum")
+            or approval.get("artwork_checksum") != job["artwork_checksum"]
+        ):
             raise LabelosException(
                 "Release requires human approval bound to artwork checksum",
                 code="RELEASE_APPROVAL_MISSING",
