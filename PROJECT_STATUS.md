@@ -36,7 +36,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
-| HTTP API / n8n orchestration | **FUTURE** (code exists; not the operator path) |
+| HTTP API / n8n orchestration | **FUTURE** (code exists; not the operator path; Render Blueprint tracks `main` and deploys only after checks pass) |
 | Illustrator generation | **FUTURE** (workstation bridge exists; live COM requires Illustrator) |
 | Prompt-to-label generation | **FUTURE** |
 | Web UI / visual editing | **FUTURE** |
@@ -114,5 +114,8 @@ API job releases require a completed package verification before approval, bind 
 to the checksum of the artwork revalidated during packaging, and revalidate the package
 immediately before release. The API regression suite covers the approval/verification
 bypass attempt.
+
+The Render Blueprint parses as YAML and was checked to deploy `main` only after CI checks
+pass. Render CLI schema validation is unavailable in this environment.
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
