@@ -31,6 +31,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Unsafe filename/path rejection | **AVAILABLE NOW** |
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
+| API approval / release integrity gate | **AVAILABLE NOW** (approval requires verification of the current package and its packaged-artwork checksum; release re-verifies the package and rejects stale verification or approval) |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
 | Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative paths are decoded, effective-DPI validated, packaged, checksummed, and reverified; remote, absolute, traversal, query/fragment, missing, and symlink paths fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
@@ -89,11 +90,11 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-09-06 from the current production-readiness branch (feature commit
-`573a524`):
+Verified on 2026-09-06 from the current production-readiness branch (feature commits
+`573a524`, `e2aa22e`):
 
 ```text
-python3 -m pytest -q                     # 65 passed (2 upstream deprecation warnings)
+python3 -m pytest -q                     # 75 passed (2 upstream deprecation warnings)
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests  # passed
 python3 -m pip check                     # passed
@@ -110,5 +111,10 @@ SVG release packages with linked rasters use manifest schema 2. Referenced relat
 paths and checksums are included in the package and revalidated; schema-1 packages
 remain verifiable. Packaging refuses artwork or linked raster assets changed after
 validation.
+
+API release verification records the manifest and packaged-artwork checksums. Approval
+must match the packaged artwork exactly; release verifies the package again before
+marking it released. Illustrator requests reject empty or unsupported export formats,
+and live success responses must include outputs in a requested format.
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
