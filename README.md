@@ -98,6 +98,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_EMBEDDED_IMAGE_INSPECTION_FAILED` | An SVG placed-raster link is unsafe, missing, or unreadable |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
@@ -109,6 +110,11 @@ byte-count mismatches, and reports that do not record a pass.
 See [PROJECT_STATUS.md](PROJECT_STATUS.md) for **AVAILABLE NOW**, **PARTIAL**,
 **EXTERNAL DEPENDENCY**, and **FUTURE**. Commercial Callas/pdfToolbox preflight is
 **not available**.
+
+SVG `<image>` assets may be embedded data URIs or local relative files below the
+SVG's directory. Linked files are decoded, DPI-checked, copied into the release
+package at the same relative path, and checksummed. Absolute, remote, traversal,
+encoded, query/fragment, missing, and symbolic-link paths are rejected.
 
 ## Documentation
 
