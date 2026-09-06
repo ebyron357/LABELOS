@@ -90,6 +90,7 @@ optional API/bridge lineage; it is not the operator-facing product.
 ## Verification record
 
 Verified on 2026-09-06 from branch `cursor/label-production-system-readiness-ee09`:
+implementation revision `dce87e3`:
 
 ```text
 python3 -m pytest -q                     # 60 passed; 2 upstream deprecation warnings
