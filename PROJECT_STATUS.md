@@ -89,20 +89,21 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-09-02 from the current production-readiness branch:
+Verified on 2026-09-06 from the current production-readiness branch (feature commit
+`573a524`):
 
 ```text
-python3 -m pytest -q                     # 65 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m pytest -q                     # 65 passed (2 upstream deprecation warnings)
 python3 -m ruff check .                  # passed
-python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
 python3 -m pip check                     # passed
 python3 -m build                         # sdist and wheel in dist/
-python3 -m labelos doctor --json         # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos doctor --json         # required tools available; Callas SKIPPED_NOT_CONFIGURED
 python3 -m labelos validate examples/label.json --json          # PASS
 python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-python3 -m labelos package examples/label.json storage/linked-raster-release
-python3 -m labelos verify-package storage/linked-raster-release # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+python3 -m labelos package examples/label.json /tmp/labelos-production-e2e/release --json
+python3 -m labelos verify-package /tmp/labelos-production-e2e/release --json  # PASS
+# after tampering artwork: checksum mismatch, FAIL
 ```
 
 SVG release packages with linked rasters use manifest schema 2. Referenced relative
