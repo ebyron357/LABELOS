@@ -43,8 +43,8 @@ labelos = "labelos.cli:main"
 labelos-api = "labelos.api:main"
 labelos-bridge = "illustrator_bridge.server:main"
 
-[tool.setuptools]
-packages = ["labelos", "labelos.schemas", "illustrator_bridge"]
+[tool.setuptools.packages.find]
+include = ["labelos*", "illustrator_bridge*"]
 
 [tool.setuptools.package-data]
 illustrator_bridge = ["scripts/*.jsx"]
