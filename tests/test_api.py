@@ -237,7 +237,7 @@ def test_job_package_verify_approve_release(api_env):
             "approver": "qa.operator",
             "comments": "Looks good",
             "approved": True,
-            "artwork_checksum": job["artwork_checksum"],
+            "artwork_checksum": job["package_artwork_checksum"],
         },
     )
     assert approve.status_code == 200
@@ -253,8 +253,74 @@ def test_job_package_verify_approve_release(api_env):
     assert package.status_code == 200
 
 
+def test_approval_is_blocked_until_package_verification(api_env):
+    client, token, _, service = api_env
+    config = {**passing_config(), "revision": "2.0"}
+    create = client.post("/jobs", headers=auth(token), json={"config": config, "auto_validate": True})
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+
+    approval = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={
+            "approver": "qa.operator",
+            "approved": True,
+            "artwork_checksum": service.jobs.get(job_id)["package_artwork_checksum"],
+        },
+    )
+
+    assert approval.status_code == 400
+    assert approval.json()["result"]["error"]["code"] == "APPROVAL_STATE"
+
+
+def test_approval_binds_to_packaged_artwork_checksum(api_env, tmp_path):
+    client, token, _, service = api_env
+    artwork = tmp_path / "label.svg"
+    artwork.write_text((ROOT / "fixtures" / "passing-label.svg").read_text(encoding="utf-8"), encoding="utf-8")
+    config = {**passing_config(), "artwork": str(artwork), "revision": "2.1"}
+    create = client.post("/jobs", headers=auth(token), json={"config": config, "auto_validate": True})
+    job_id = create.json()["job_id"]
+    original_checksum = service.jobs.get(job_id)["artwork_checksum"]
+    artwork.write_text(artwork.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    packaged_checksum = service.jobs.get(job_id)["package_artwork_checksum"]
+    assert packaged_checksum != original_checksum
+
+    stale = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa.operator", "approved": True, "artwork_checksum": original_checksum},
+    )
+
+    assert stale.status_code == 400
+    assert stale.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+
+
+def test_release_rechecks_the_verified_package(api_env):
+    client, token, _, service = api_env
+    config = {**passing_config(), "revision": "2.2"}
+    create = client.post("/jobs", headers=auth(token), json={"config": config, "auto_validate": True})
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    assert client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa.operator", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    ).status_code == 200
+    next(Path(job["package_path"]).glob("*.svg")).write_text("tampered", encoding="utf-8")
+
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_REQUIRED"
+
+
 def test_approval_checksum_mismatch_rejected(api_env):
-    client, token, _, _service = api_env
+    client, token, _, service = api_env
     config = passing_config()
     create = client.post(
         "/jobs",
@@ -277,6 +343,7 @@ def test_approval_checksum_mismatch_rejected(api_env):
     job_id = create.json()["job_id"]
     client.post("/package", headers=auth(token), json={"job_id": job_id})
     client.post("/verify-package", headers=auth(token), json={"job_id": job_id})
+    expected = service.jobs.get(job_id)["package_artwork_checksum"]
     bad = client.post(
         f"/jobs/{job_id}/approve",
         headers=auth(token),
@@ -284,3 +351,4 @@ def test_approval_checksum_mismatch_rejected(api_env):
     )
     assert bad.status_code == 400
     assert bad.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+    assert bad.json()["result"]["error"]["details"]["expected"] == expected

@@ -31,6 +31,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Unsafe filename/path rejection | **AVAILABLE NOW** |
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
+| Automated job release integrity | **AVAILABLE NOW** (verification is required before approval; approval binds to the packaged-artwork checksum; release rechecks package integrity) |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
 | Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (only safe local relative files; decoded, DPI-checked, checksummed, and included in release packages) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
@@ -92,7 +93,7 @@ optional API/bridge lineage; it is not the operator-facing product.
 Fully verified on 2026-09-06 from the active automation branch:
 
 ```text
-python3 -m pytest -q                     # 59 passed; 2 upstream deprecation warnings
+python3 -m pytest -q                     # 62 passed; 2 upstream deprecation warnings
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests  # passed
 python3 -m pip check                     # passed

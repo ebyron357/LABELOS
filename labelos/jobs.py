@@ -411,6 +411,10 @@ class ProductionService:
 
         job["package_path"] = str(destination)
         job["package_checksum"] = sha256_file(manifest)
+        job["package_artwork_checksum"] = _package_artwork_checksum(manifest)
+        # A newly created package must be verified again before it can be approved/released.
+        job.pop("verified_package_checksum", None)
+        job.pop("verified_artwork_checksum", None)
         job["timestamps"]["packaged_at"] = datetime.now(timezone.utc).isoformat()
         self.jobs.save(job)
         return job
@@ -442,6 +446,9 @@ class ProductionService:
                 category=PACKAGE_VERIFICATION_FAILED,
                 details={"failures": failures},
             )
+        manifest = Path(package_path) / "manifest.json"
+        job["verified_package_checksum"] = sha256_file(manifest)
+        job["verified_artwork_checksum"] = _package_artwork_checksum(manifest)
         self.jobs.transition(job, JobLifecycle.AWAITING_APPROVAL)
         return job
 
@@ -470,16 +477,13 @@ class ProductionService:
         artwork_checksum: str | None = None,
     ) -> dict[str, Any]:
         job = self.jobs.get(job_id)
-        if job["status"] not in {
-            JobLifecycle.AWAITING_APPROVAL.value,
-            JobLifecycle.TECHNICALLY_VALIDATED.value,
-        }:
+        if job["status"] != JobLifecycle.AWAITING_APPROVAL.value:
             raise LabelosException(
                 f"Job status {job['status']} is not awaiting approval",
                 code="APPROVAL_STATE",
                 category=APPROVAL_ERROR,
             )
-        expected = job.get("artwork_checksum")
+        expected = job.get("verified_artwork_checksum")
         if artwork_checksum is None:
             artwork_checksum = expected
         if not artwork_checksum:
@@ -490,7 +494,7 @@ class ProductionService:
             )
         if expected and artwork_checksum != expected:
             raise LabelosException(
-                "Approval checksum does not match the job artwork checksum",
+                "Approval checksum does not match the verified package artwork checksum",
                 code="APPROVAL_CHECKSUM_MISMATCH",
                 category=APPROVAL_ERROR,
                 details={"expected": expected, "provided": artwork_checksum},
@@ -505,8 +509,6 @@ class ProductionService:
         job["approval_result"] = approval
         job["timestamps"]["approval_at"] = approval["timestamp"]
         if approved:
-            if job["status"] == JobLifecycle.TECHNICALLY_VALIDATED.value:
-                self.jobs.transition(job, JobLifecycle.AWAITING_APPROVAL)
             self.jobs.transition(job, JobLifecycle.APPROVED_FOR_PRODUCTION)
             job["final_status"] = JobLifecycle.APPROVED_FOR_PRODUCTION.value
         else:
@@ -529,10 +531,18 @@ class ProductionService:
                 code="RELEASE_PACKAGE_MISSING",
                 category=PACKAGE_ERROR,
             )
-        approval = job.get("approval_result") or {}
-        if not approval.get("approved"):
+        if not _package_verification_is_current(job):
             raise LabelosException(
-                "Release requires human approval bound to artwork checksum",
+                "Release requires a current successful package verification",
+                code="RELEASE_VERIFICATION_REQUIRED",
+                category=PACKAGE_ERROR,
+            )
+        approval = job.get("approval_result") or {}
+        if not approval.get("approved") or (
+            approval.get("artwork_checksum") != job.get("verified_artwork_checksum")
+        ):
+            raise LabelosException(
+                "Release requires human approval bound to verified package artwork checksum",
                 code="RELEASE_APPROVAL_MISSING",
                 category=APPROVAL_ERROR,
             )
@@ -541,3 +551,43 @@ class ProductionService:
         job["timestamps"]["released_at"] = datetime.now(timezone.utc).isoformat()
         self.jobs.save(job)
         return job
+
+
+def _package_artwork_checksum(manifest_path: Path) -> str:
+    """Read the artwork digest from a package manifest created by LABELOS."""
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        digest = manifest["artwork"]["sha256"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise LabelosException(
+            "Package manifest does not contain a valid artwork checksum",
+            code="PACKAGE_MANIFEST_INVALID",
+            category=PACKAGE_ERROR,
+        ) from error
+    if not isinstance(digest, str):
+        raise LabelosException(
+            "Package manifest does not contain a valid artwork checksum",
+            code="PACKAGE_MANIFEST_INVALID",
+            category=PACKAGE_ERROR,
+        )
+    return digest
+
+
+def _package_verification_is_current(job: dict[str, Any]) -> bool:
+    """Ensure a successful verification is bound to the exact package being released."""
+
+    package_path = job.get("package_path")
+    verified_manifest = job.get("verified_package_checksum")
+    verified_artwork = job.get("verified_artwork_checksum")
+    if not package_path or not verified_manifest or not verified_artwork:
+        return False
+    manifest = Path(package_path) / "manifest.json"
+    if not manifest.is_file() or sha256_file(manifest) != verified_manifest:
+        return False
+    if verify_package(Path(package_path)):
+        return False
+    try:
+        return _package_artwork_checksum(manifest) == verified_artwork
+    except LabelosException:
+        return False

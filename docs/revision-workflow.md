@@ -37,8 +37,8 @@ ALT-SYR-MANGO-001
   2.0
 ```
 
-Each revision stores template checksum, product-data checksum, artwork checksum, config checksum,
-validation report, approval, package, and timestamps.
+Each revision stores template checksum, product-data checksum, source-artwork checksum,
+packaged-artwork checksum, config checksum, validation report, approval, package, and timestamps.
 
 ## Immutability
 
@@ -48,5 +48,6 @@ validation report, approval, package, and timestamps.
 
 ## Approval binding
 
-Approval captures approver, timestamp, comments, and the **exact artwork SHA-256** being approved.
-Technical validation is not legal/regulatory approval.
+Approval is available only after package verification. It captures approver, timestamp, comments,
+and the **exact packaged-artwork SHA-256** being approved. Release rechecks that the package
+has not changed since verification. Technical validation is not legal/regulatory approval.
