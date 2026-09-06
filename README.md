@@ -85,6 +85,11 @@ codes must decode to an expected string.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
 
+For SVG artwork, embedded and linked raster images are inspected for effective DPI.
+Linked assets must be plain relative paths below the SVG file's directory; URLs,
+path traversal, and symlinks are rejected. Validated linked assets are copied into
+the release package at the same relative paths, with individual manifest checksums.
+
 ## Error codes
 
 | Code | Meaning |
