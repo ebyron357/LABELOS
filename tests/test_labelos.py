@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -358,6 +360,19 @@ def test_cli_validate_failing_fixture():
     assert main(["validate", str(ROOT / "examples/failing-label.json"), "--json"]) == 1
 
 
+def test_module_cli_help():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Validate and package production labels" in result.stdout
+
+
 def test_cli_doctor_reports_callas_unavailable(capsys):
     assert main(["doctor", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -465,6 +480,56 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    raster = tmp_path / "assets" / "label-image.png"
+    raster.parent.mkdir()
+    Image.new("RGB", (300, 300), "black").save(raster)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20"><image href="assets/label-image.png" '
+            'width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/label-image.png"
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["schema_version"] == 2
+    assert manifest_data["linked_assets"]["assets/label-image.png"]["file"] == "assets/label-image.png"
+    assert (manifest.parent / "assets" / "label-image.png").read_bytes() == raster.read_bytes()
+    assert not verify_package(manifest.parent)
+
+
+def test_linked_svg_raster_rejects_unsafe_paths(tmp_path):
+    outside = tmp_path.parent / "outside.png"
+    Image.new("RGB", (300, 300), "black").save(outside)
+    artwork = tmp_path / "unsafe-link.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20"><image href="../outside.png" width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 1}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_UNSAFE" for issue in report.issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):

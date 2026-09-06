@@ -12,7 +12,7 @@ from typing import Any
 
 from .models import LabelSpec, Report
 
-_PACKAGE_SCHEMA_VERSION = 1
+_PACKAGE_SCHEMA_VERSION = 2
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _RESERVED_FILENAMES = {"manifest.json", "validation-report.json", "label-spec.json"}
 
@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -54,6 +55,7 @@ def create_package(
         "artwork": _manifest_entry(artwork_destination),
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
+        "linked_assets": linked_assets,
         "extras": extra_manifest,
         "spec": spec_payload,
     }
@@ -76,7 +78,8 @@ def verify_package(destination: Path) -> list[str]:
         return ["manifest.json must contain a JSON object"]
 
     failures: list[str] = []
-    if manifest.get("schema_version") != _PACKAGE_SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {1, _PACKAGE_SCHEMA_VERSION}:
         failures.append(f"unsupported manifest schema version: {manifest.get('schema_version')!r}")
 
     entries: dict[str, Path] = {}
@@ -93,6 +96,20 @@ def verify_package(destination: Path) -> list[str]:
             extra_path = _validate_entry(destination, f"extra:{name}", entry, failures)
             if extra_path is not None and not _is_package_filename(str(entry.get("file", name))):
                 failures.append(f"extra file path is invalid: {name}")
+
+    if schema_version == _PACKAGE_SCHEMA_VERSION:
+        linked_assets = manifest.get("linked_assets")
+        if not isinstance(linked_assets, dict):
+            failures.append("linked_assets manifest entry must be an object")
+        else:
+            for name, entry in linked_assets.items():
+                path = _validate_entry(destination, f"linked asset:{name}", entry, failures)
+                if path is not None and (
+                    not isinstance(name, str)
+                    or not _is_package_path(name)
+                    or entry.get("file") != name
+                ):
+                    failures.append(f"linked asset file path is invalid: {name}")
 
     _validate_report_and_spec(manifest, entries, failures)
     return failures
@@ -118,13 +135,57 @@ def _is_package_filename(value: str) -> bool:
     return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
 
 
+def _is_package_path(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def _copy_linked_assets(spec: LabelSpec, report: Report, destination: Path) -> dict[str, Any]:
+    """Copy validated local SVG raster dependencies without following links or escaping."""
+
+    assets: dict[str, Any] = {}
+    images = report.metadata.get("svg_linked_images", [])
+    if not isinstance(images, list):
+        raise TypeError("Validation report linked-image metadata is invalid")
+    source_root = spec.artwork.parent.resolve()
+    for image in images:
+        if not isinstance(image, dict) or not isinstance(image.get("file"), str):
+            raise TypeError("Validation report linked-image metadata is invalid")
+        relative = image["file"]
+        if not _is_package_path(relative):
+            raise ValueError(f"Unsafe linked artwork path: {relative}")
+        candidate = source_root / relative
+        if candidate.is_symlink():
+            raise ValueError(f"Linked artwork file is missing or unsafe: {relative}")
+        source = candidate.resolve()
+        if not source.is_file():
+            raise ValueError(f"Linked artwork file is missing or unsafe: {relative}")
+        try:
+            source.relative_to(source_root)
+        except ValueError as error:
+            raise ValueError(f"Unsafe linked artwork path: {relative}") from error
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        assets[relative] = {**_manifest_entry(target), "file": relative}
+    return assets
+
+
 def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
     if not isinstance(entry, dict):
         failures.append(f"{key} manifest entry is missing or invalid")
         return None
 
     filename = entry.get("file")
-    if not isinstance(filename, str) or not _is_package_filename(filename):
+    is_linked_asset = key.startswith("linked asset:")
+    valid_path = _is_package_path(filename) if is_linked_asset and isinstance(filename, str) else (
+        _is_package_filename(filename) if isinstance(filename, str) else False
+    )
+    if not valid_path:
         failures.append(f"{key} file must be a package-relative filename")
         return None
 
