@@ -82,8 +82,11 @@ codes must decode to an expected string.
 | `labelos doctor [--json]` | Report required and optional tools |
 
 `package` refuses to write over an existing destination and refuses failed reports.
-`verify-package` rejects path traversal, non-regular files, checksum mismatches,
-byte-count mismatches, and reports that do not record a pass.
+When an SVG contains local linked raster images, it validates their effective DPI and
+includes safe linked files at their original relative paths in the release package.
+Network, absolute, escaping, and symlinked links are rejected. `verify-package`
+rejects path traversal, non-regular files, checksum mismatches, byte-count mismatches,
+and reports that do not record a pass.
 
 ## Error codes
 
@@ -98,6 +101,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | A local linked SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | A linked SVG raster is unsafe, missing, or unreadable |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
