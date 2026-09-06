@@ -237,7 +237,7 @@ def test_job_package_verify_approve_release(api_env):
             "approver": "qa.operator",
             "comments": "Looks good",
             "approved": True,
-            "artwork_checksum": job["artwork_checksum"],
+            "artwork_checksum": job["package_artwork_checksum"],
         },
     )
     assert approve.status_code == 200
@@ -284,3 +284,73 @@ def test_approval_checksum_mismatch_rejected(api_env):
     )
     assert bad.status_code == 400
     assert bad.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+
+
+def test_approval_and_release_require_successful_package_verification(api_env):
+    client, token, _, service = api_env
+    create = client.post(
+        "/jobs",
+        headers=auth(token),
+        json={"config": passing_config(), "mode": "RERUN", "auto_validate": True},
+    )
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+
+    approval = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    )
+    assert approval.status_code == 400
+    assert approval.json()["result"]["error"]["code"] == "APPROVAL_STATE"
+
+    # A persisted or legacy APPROVED job must still fail closed until its current package is verified.
+    job["status"] = "APPROVED_FOR_PRODUCTION"
+    job["approval_result"] = {"approved": True, "artwork_checksum": job["package_artwork_checksum"]}
+    service.jobs.save(job)
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_REQUIRED"
+
+
+def test_release_rejects_package_changed_after_verification(api_env):
+    client, token, _, service = api_env
+    create = client.post(
+        "/jobs",
+        headers=auth(token),
+        json={"config": passing_config(), "mode": "RERUN", "auto_validate": True},
+    )
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    assert client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    ).status_code == 200
+
+    artwork = next(Path(job["package_path"]).glob("*.svg"))
+    artwork.write_text("tampered", encoding="utf-8")
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_STALE"
+
+
+def test_failed_verification_invalidates_job_verification_state(api_env):
+    client, token, _, service = api_env
+    create = client.post(
+        "/jobs",
+        headers=auth(token),
+        json={"config": passing_config(), "mode": "RERUN", "auto_validate": True},
+    )
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    next(Path(job["package_path"]).glob("*.svg")).write_text("tampered", encoding="utf-8")
+
+    verify = client.post("/verify-package", headers=auth(token), json={"job_id": job_id})
+    assert verify.status_code == 400
+    assert verify.json()["result"]["error"]["code"] == "PACKAGE_VERIFICATION_FAILED"
+    assert service.jobs.get(job_id)["package_verification"] is None

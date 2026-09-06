@@ -49,6 +49,7 @@ from labelos.security import resolve_under, sanitize_token
 configure_logging(os.environ.get("LABELOS_LOG_LEVEL", "INFO"))
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "scripts" / "generate_label.jsx"
+SUPPORTED_EXPORT_FORMATS = frozenset({"pdf", "ai", "png"})
 
 
 def _bridge_token() -> str:
@@ -121,6 +122,48 @@ def build_extendscript_payload(
         "preserveLockedLayers": True,
         "lockedLayerNames": ["BRAND_MARK", "DIELINE", "PRODUCTION", "BACKGROUND_ART"],
     }
+
+
+def validate_export_formats(export_formats: list[str]) -> list[str]:
+    """Reject invalid Illustrator export requests before creating any output."""
+
+    formats = [value.lower() for value in export_formats]
+    if not formats:
+        raise LabelosException(
+            "At least one export format is required",
+            code="EXPORT_FORMATS_REQUIRED",
+            category=INPUT_ERROR,
+        )
+    invalid = sorted(set(formats) - SUPPORTED_EXPORT_FORMATS)
+    if invalid:
+        raise LabelosException(
+            f"Unsupported export format(s): {', '.join(invalid)}",
+            code="EXPORT_FORMAT_INVALID",
+            category=INPUT_ERROR,
+            details={"supported": sorted(SUPPORTED_EXPORT_FORMATS), "invalid": invalid},
+        )
+    return formats
+
+
+def validate_generation_result(result: dict[str, Any], requested_formats: list[str]) -> None:
+    """Ensure a successful Illustrator response has requested, usable outputs."""
+
+    outputs = result.get("outputs")
+    if not isinstance(outputs, list) or not outputs:
+        raise LabelosException(
+            "Illustrator reported success without generated outputs",
+            code="ILLUSTRATOR_NO_OUTPUTS",
+            category=ARTWORK_GENERATION_ERROR,
+        )
+    for index, output in enumerate(outputs, start=1):
+        output_format = output.get("format") if isinstance(output, dict) else None
+        if not isinstance(output_format, str) or output_format.lower() not in requested_formats:
+            raise LabelosException(
+                f"Illustrator output {index} has an unrequested or invalid format",
+                code="ILLUSTRATOR_OUTPUT_FORMAT_INVALID",
+                category=ARTWORK_GENERATION_ERROR,
+                details={"requested": requested_formats, "output": output},
+            )
 
 
 def run_illustrator_job(payload: dict[str, Any]) -> dict[str, Any]:
@@ -232,6 +275,7 @@ def create_bridge_app() -> FastAPI:
     async def generate(body: GenerateRequest) -> dict[str, Any]:
         with log_operation("illustrator.generate", dry_run=body.dry_run):
             record = parse_product_record(body.product_data)
+            export_formats = validate_export_formats(body.export_formats)
             template_name = sanitize_token(Path(body.template_path).name, field="template")
             # Template may be provided as absolute under templates root or relative name.
             if Path(body.template_path).is_absolute():
@@ -276,7 +320,7 @@ def create_bridge_app() -> FastAPI:
                 template=template if template.is_file() else templates_root / record.label.template,
                 output_dir=job_out,
                 variables=variables,
-                export_formats=body.export_formats,
+                export_formats=export_formats,
                 barcode_value=record.codes.barcode,
                 qr_value=record.codes.qr,
             )
@@ -332,6 +376,7 @@ def create_bridge_app() -> FastAPI:
             shutil.copy2(template, working_template)
             payload["templatePath"] = str(working_template)
             result = run_illustrator_job(payload)
+            validate_generation_result(result, export_formats)
             return {
                 "success": True,
                 "status": "ARTWORK_GENERATED",

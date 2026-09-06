@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: current production-readiness branch.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -31,8 +31,9 @@ they are **not** required to use LABELOS on production artwork today.
 | Unsafe filename/path rejection | **AVAILABLE NOW** |
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
+| API approval / release integrity gate | **AVAILABLE NOW** (approval requires verification of the current package and its packaged-artwork checksum; release re-verifies the package and rejects stale verification or approval) |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative paths are decoded, effective-DPI validated, packaged, checksummed, and reverified; remote, absolute, traversal, query/fragment, missing, and symlink paths fail closed) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,20 +90,31 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-06 from the current production-readiness branch (feature commits
+`573a524`, `e2aa22e`):
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+python3 -m pytest -q                     # 75 passed (2 upstream deprecation warnings)
+python3 -m ruff check .                  # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                     # passed
+python3 -m build                         # sdist and wheel in dist/
+python3 -m labelos doctor --json         # required tools available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json /tmp/labelos-production-e2e/release --json
+python3 -m labelos verify-package /tmp/labelos-production-e2e/release --json  # PASS
+# after tampering artwork: checksum mismatch, FAIL
 ```
+
+SVG release packages with linked rasters use manifest schema 2. Referenced relative
+paths and checksums are included in the package and revalidated; schema-1 packages
+remain verifiable. Packaging refuses artwork or linked raster assets changed after
+validation.
+
+API release verification records the manifest and packaged-artwork checksums. Approval
+must match the packaged artwork exactly; release verifies the package again before
+marking it released. Illustrator requests reject empty or unsupported export formats,
+and live success responses must include outputs in a requested format.
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
