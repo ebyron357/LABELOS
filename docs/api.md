@@ -76,8 +76,10 @@ Modes: `NORMAL` (duplicate → `DUPLICATE_SKIPPED`), `RERUN`, `NEW_REVISION`.
 
 ### `POST /jobs/{job_id}/approve`
 
-Requires `approver` and artwork checksum binding.
+Requires a successful `POST /verify-package` for the job, then binds `approver` to the
+SHA-256 of the artwork in that verified package (not the source artwork digest).
 
 ### `POST /jobs/{job_id}/release`
 
-Requires `APPROVED_FOR_PRODUCTION` + verified package.
+Requires `APPROVED_FOR_PRODUCTION` plus a current verified package. The release step
+rechecks package integrity and rejects any package modified after verification.
