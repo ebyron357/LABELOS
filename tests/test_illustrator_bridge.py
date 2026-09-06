@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from illustrator_bridge.server import create_bridge_app
+from illustrator_bridge.server import (
+    create_bridge_app,
+    validate_export_formats,
+    validate_generation_result,
+)
+from labelos.errors import LabelosException
 
 
 @pytest.fixture()
@@ -113,3 +118,52 @@ def test_bridge_live_generate_fails_closed_without_illustrator(bridge):
     payload = response.json()
     assert payload["success"] is False
     assert payload["result"]["error"]["category"] == "ILLUSTRATOR_ERROR"
+
+
+@pytest.mark.parametrize("formats", [[], ["pfd"], ["pdf", "eps"]])
+def test_bridge_rejects_empty_or_unknown_export_formats(bridge, formats):
+    client, token = bridge
+    response = client.post(
+        "/generate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "product_data": product_payload(),
+            "template_path": "alternative-syrup.ai",
+            "dry_run": True,
+            "export_formats": formats,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["result"]["error"]["code"] in {
+        "EXPORT_FORMATS_REQUIRED",
+        "EXPORT_FORMAT_INVALID",
+    }
+
+
+def test_bridge_normalizes_supported_export_formats():
+    assert validate_export_formats(["PDF", "png", "ai"]) == ["pdf", "png", "ai"]
+
+
+@pytest.mark.parametrize(
+    "result,formats,code",
+    [
+        ({"success": True, "outputs": []}, ["pdf"], "ILLUSTRATOR_NO_OUTPUTS"),
+        (
+            {"success": True, "outputs": [{"format": "eps", "path": "label.eps"}]},
+            ["pdf"],
+            "ILLUSTRATOR_OUTPUT_FORMAT_INVALID",
+        ),
+    ],
+)
+def test_bridge_rejects_invalid_successful_generation_results(result, formats, code):
+    with pytest.raises(LabelosException) as error:
+        validate_generation_result(result, formats)
+    assert error.value.error.code == code
+
+
+def test_bridge_accepts_requested_generation_outputs():
+    validate_generation_result(
+        {"success": True, "outputs": [{"format": "pdf", "path": "label.pdf"}]},
+        ["pdf"],
+    )
