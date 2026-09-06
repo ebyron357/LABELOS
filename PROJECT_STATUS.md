@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (only safe local relative raster links; DPI-checked and included in release packages) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,19 +89,19 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-06 from branch `cursor/label-production-system-readiness-ee09`:
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python3 -m pytest -q                     # 60 passed; 2 upstream deprecation warnings
+python3 -m ruff check .                  # passed
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check                     # passed
+python3 -m build                         # sdist and wheel built successfully
+python3 -m labelos doctor --json         # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate /tmp/labelos-linked-cli/spec.json --json  # PASS
+python3 -m labelos package /tmp/labelos-linked-cli/spec.json /tmp/labelos-linked-cli/release --json
+python3 -m labelos verify-package /tmp/labelos-linked-cli/release --json  # PASS
+# linked SVG raster is copied to release/assets/raster.png and checksummed in schema 2 manifest
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 

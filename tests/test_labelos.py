@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,19 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_cli_dispatches_to_operator_commands():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +480,65 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_checked_and_packaged_with_relative_path(tmp_path):
+    asset = tmp_path / "images" / "product.png"
+    asset.parent.mkdir()
+    Image.new("RGB", (120, 120), "white").save(asset)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="images/product.png" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest_path = create_package(spec, report, tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "images/product.png"
+    assert (manifest_path.parent / "images" / "product.png").read_bytes() == asset.read_bytes()
+    assert manifest["schema_version"] == 2
+    assert manifest["linked_assets"][0]["file"] == "images/product.png"
+    assert verify_package(manifest_path.parent) == []
+
+
+def test_linked_svg_raster_cannot_escape_artwork_directory(tmp_path):
+    outside = tmp_path.parent / "outside.png"
+    Image.new("RGB", (120, 120), "white").save(outside)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm">'
+            '<image href="../outside.png" width="10mm" height="10mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_schema_one_release_packages_remain_verifiable(tmp_path):
+    manifest_path = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 1
+    manifest.pop("linked_assets")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_package(manifest_path.parent) == []
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
