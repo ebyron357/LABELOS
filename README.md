@@ -24,6 +24,8 @@ expected. Do not treat it as a pass.
 
 1. **Install** LABELOS as above.
 2. **Prepare artwork** as SVG, PNG, or single-page PDF. Artwork size must include bleed.
+   SVGs may include embedded rasters or local relative raster files beneath the SVG directory;
+   remote URLs, parent-directory paths, and symbolic links are rejected.
 3. **Create a label spec** JSON file. Start from [`examples/label.json`](examples/label.json).
 4. **Validate:** `labelos validate examples/label.json --json`
 5. **Interpret errors.** Each issue has a `code` and `message`. See [Error codes](#error-codes).
@@ -83,7 +85,8 @@ codes must decode to an expected string.
 
 `package` refuses to write over an existing destination and refuses failed reports.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
-byte-count mismatches, and reports that do not record a pass.
+byte-count mismatches, and reports that do not record a pass. It preserves validated
+local SVG raster paths in the release directory and checks them in the manifest.
 
 ## Error codes
 
@@ -97,7 +100,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `SVG_DIMENSIONS_MISSING` | SVG width/height must use mm, cm, in, or pt |
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
-| `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Embedded or local placed SVG raster is below `min_dpi` |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
