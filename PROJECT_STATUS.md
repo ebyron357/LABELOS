@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (plain local relative rasters under the SVG directory are decoded, DPI-checked, copied into packages, and checksummed; remote, parent-directory, and symlink targets are rejected) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -106,3 +106,21 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+Verified on 2026-09-06 from branch `cursor/label-production-system-readiness-073c`:
+
+```text
+python3 -m pytest -q                   # 59 passed (2 upstream deprecation warnings)
+python3 -m ruff check .                 # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                    # passed
+python3 -m build                        # sdist + wheel passed
+python3 -m labelos doctor --json        # required tools available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json     # PASS
+python3 -m labelos package examples/label.json /tmp/labelos-release-e2e --json
+python3 -m labelos verify-package /tmp/labelos-release-e2e --json  # PASS
+python3 -m labelos validate examples/failing-label.json --json     # exits 1 as expected
+```
+
+The release manifest is schema 2 for new packages and includes checksummed local SVG
+raster dependencies. `verify-package` continues to accept existing schema-1 packages.
