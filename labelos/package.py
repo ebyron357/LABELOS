@@ -12,7 +12,7 @@ from typing import Any
 
 from .models import LabelSpec, Report
 
-_PACKAGE_SCHEMA_VERSION = 1
+_PACKAGE_SCHEMA_VERSION = 2
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _RESERVED_FILENAMES = {"manifest.json", "validation-report.json", "label-spec.json"}
 
@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_svg_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -47,13 +48,14 @@ def create_package(
             target.write_text(payload, encoding="utf-8")
         else:
             target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        extra_manifest[target.name] = _manifest_entry(target)
+        extra_manifest[target.name] = _manifest_entry(target, destination)
     manifest = {
         "schema_version": _PACKAGE_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "artwork": _manifest_entry(artwork_destination),
-        "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
-        "label_spec": _manifest_entry(spec_path),
+        "artwork": _manifest_entry(artwork_destination, destination),
+        "linked_assets": linked_assets,
+        "validation_report": {**_manifest_entry(report_path, destination), "passed": report.passed},
+        "label_spec": _manifest_entry(spec_path, destination),
         "extras": extra_manifest,
         "spec": spec_payload,
     }
@@ -76,7 +78,8 @@ def verify_package(destination: Path) -> list[str]:
         return ["manifest.json must contain a JSON object"]
 
     failures: list[str] = []
-    if manifest.get("schema_version") != _PACKAGE_SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {1, _PACKAGE_SCHEMA_VERSION}:
         failures.append(f"unsupported manifest schema version: {manifest.get('schema_version')!r}")
 
     entries: dict[str, Path] = {}
@@ -94,6 +97,14 @@ def verify_package(destination: Path) -> list[str]:
             if extra_path is not None and not _is_package_filename(str(entry.get("file", name))):
                 failures.append(f"extra file path is invalid: {name}")
 
+    if schema_version == _PACKAGE_SCHEMA_VERSION:
+        linked_assets = manifest.get("linked_assets")
+        if not isinstance(linked_assets, list):
+            failures.append("linked_assets manifest entry must be a list")
+        else:
+            for index, entry in enumerate(linked_assets):
+                _validate_entry(destination, f"linked_asset:{index}", entry, failures)
+
     _validate_report_and_spec(manifest, entries, failures)
     return failures
 
@@ -105,8 +116,12 @@ def _assert_package_filename(filename: str, extra: bool = False) -> None:
         raise ValueError(f"Unsafe package extra filename: {filename}")
 
 
-def _manifest_entry(path: Path) -> dict[str, str | int]:
-    return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
+def _manifest_entry(path: Path, destination: Path) -> dict[str, str | int]:
+    return {
+        "file": path.relative_to(destination).as_posix(),
+        "sha256": sha256_file(path),
+        "bytes": path.stat().st_size,
+    }
 
 
 def _is_regular_file(path: Path) -> bool:
@@ -115,7 +130,35 @@ def _is_regular_file(path: Path) -> bool:
 
 def _is_package_filename(value: str) -> bool:
     path = Path(value)
-    return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and "\\" not in value
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def _copy_linked_svg_assets(spec: LabelSpec, report: Report, destination: Path) -> list[dict[str, str | int]]:
+    """Copy validation-approved SVG raster dependencies preserving their relative links."""
+
+    copied: list[dict[str, str | int]] = []
+    assets = report.metadata.get("svg_linked_assets", [])
+    if not isinstance(assets, list):
+        raise TypeError("Validated SVG linked assets metadata is invalid")
+    for asset in assets:
+        if not isinstance(asset, dict) or not isinstance(asset.get("file"), str):
+            raise TypeError("Validated SVG linked asset metadata is invalid")
+        relative = asset["file"]
+        if not _is_package_filename(relative) or relative in _RESERVED_FILENAMES:
+            raise ValueError(f"Unsafe linked SVG asset filename: {relative}")
+        source = spec.artwork.parent / relative
+        if not _is_regular_file(source):
+            raise ValueError(f"Validated SVG linked asset is missing: {relative}")
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        copied.append(_manifest_entry(target, destination))
+    return copied
 
 
 def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
