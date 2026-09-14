@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (plain local relative links only; decoded, effective-DPI validated, checksummed and included in release packages) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,7 +89,8 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Latest verified baseline: 2026-09-14 from the active readiness branch. The following
+commands must be re-run after every production-facing change:
 
 ```text
 python -m pytest -q                      # 52 passed
@@ -106,3 +107,8 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+Current worktree verification (2026-09-14): linked local SVG rasters are validated,
+packaged, and re-verified with regression coverage. The complete suite, lint,
+compile, dependency, build, and CLI workflow checks are recorded in the run artifact
+before this work is committed. Callas remains `SKIPPED_NOT_CONFIGURED`.

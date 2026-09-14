@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,19 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_entry_point_runs_doctor():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +480,89 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def _linked_raster_svg(tmp_path, image_name: str, display_mm: int = 20) -> Path:
+    artwork = tmp_path / "linked-raster.svg"
+    artwork.write_text(
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{display_mm}mm" '
+            f'height="{display_mm}mm" viewBox="0 0 {display_mm} {display_mm}">'
+            f'<image href="{image_name}" width="{display_mm}" height="{display_mm}"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    return artwork
+
+
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    asset_directory = tmp_path / "assets"
+    asset_directory.mkdir()
+    Image.new("RGB", (600, 600), "black").save(asset_directory / "print.png")
+    artwork = _linked_raster_svg(tmp_path, "assets/print.png")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_assets"] == ["assets/print.png"]
+    assert report.metadata["svg_embedded_images"][0]["dpi"] == 762.0
+    assert (manifest.parent / "assets" / "print.png").is_file()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["linked_assets"][0]["file"] == "assets/print.png"
+    assert not verify_package(manifest.parent)
+
+
+def test_under_resolution_linked_svg_raster_fails(tmp_path):
+    Image.new("RGB", (72, 72), "black").save(tmp_path / "low.png")
+    artwork = _linked_raster_svg(tmp_path, "low.png")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_verify_package_rejects_linked_asset_below_symlinked_directory(tmp_path):
+    source_assets = tmp_path / "assets"
+    source_assets.mkdir()
+    Image.new("RGB", (600, 600), "black").save(source_assets / "print.png")
+    artwork = _linked_raster_svg(tmp_path, "assets/print.png")
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 20, "height_mm": 20, "min_dpi": 300}, tmp_path
+    )
+    manifest = create_package(spec, validate(spec), tmp_path / "release")
+    package_assets = manifest.parent / "assets"
+    package_asset = package_assets / "print.png"
+    package_asset.unlink()
+    package_assets.rmdir()
+    external_assets = tmp_path / "external-assets"
+    external_assets.mkdir()
+    Image.new("RGB", (600, 600), "black").save(external_assets / "print.png")
+    try:
+        package_assets.symlink_to(external_assets, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+
+    assert verify_package(manifest.parent) == [
+        "linked asset 1 file is missing or is not a regular file: assets/print.png"
+    ]
+
+
+@pytest.mark.parametrize("href", ["missing.png", "../outside.png", "https://example.test/image.png"])
+def test_unsafe_or_missing_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = _linked_raster_svg(tmp_path, href)
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 20, "height_mm": 20}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
