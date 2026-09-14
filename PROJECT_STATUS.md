@@ -89,26 +89,25 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-14 from implementation commit `5f439f8dd020a27cd3ed87311b3e80ebafdbb41d`
+on `cursor/label-production-system-readiness-326a`:
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+python3 -m pytest -q                     # 62 passed; 2 upstream deprecation warnings
+python3 -m ruff check .                  # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                     # passed
+python3 -m build                         # sdist and wheel in dist/
+python3 -m labelos doctor --json         # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json /tmp/labelos-release-1789380889 --json
+python3 -m labelos verify-package /tmp/labelos-release-1789380889 --json  # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
 
 ## Next autonomous run
 
-Run the full verification record above after merging the linked-SVG-raster change. No
-other implementation gaps are currently identified; remaining items are the documented
-human/external dependencies.
+Start with the full verification record above. No other implementation gaps are
+currently identified; remaining items are the documented human/external dependencies.
