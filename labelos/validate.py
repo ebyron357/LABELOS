@@ -9,7 +9,7 @@ import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlparse
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
@@ -168,6 +168,27 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def _svg_linked_raster_path(href: str, svg_path: Path) -> tuple[Path, str] | None:
+    """Resolve a local linked image without permitting package-escaping paths."""
+
+    if href.startswith("data:"):
+        return None
+    parsed = urlparse(href)
+    if parsed.scheme or parsed.netloc or parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("image href must be a plain relative file path")
+    if not parsed.path:
+        raise ValueError("image href is empty")
+    root = svg_path.parent.resolve()
+    candidate = (root / unquote_to_bytes(parsed.path).decode("utf-8")).resolve()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as error:
+        raise ValueError("image href escapes the SVG directory") from error
+    if not candidate.is_file() or candidate.is_symlink():
+        raise ValueError("linked image is missing or is not a regular file")
+    return candidate, relative.as_posix()
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -228,8 +249,9 @@ def _validate_svg_embedded_rasters(
     images = [element for element in root.iter() if _local_name(element.tag) == "image"]
     if not images:
         return
-    report.checks.append("svg-embedded-raster-resolution")
+    report.checks.append("svg-raster-resolution")
     inspected_images = []
+    linked_images = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
@@ -237,11 +259,14 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
-            if data is None:
-                continue
             from PIL import Image
 
-            with Image.open(BytesIO(data)) as raster:
+            linked = _svg_linked_raster_path(href, spec.artwork) if data is None else None
+            if data is None and linked is None:
+                continue
+            raster_source = BytesIO(data) if data is not None else linked[0]
+            with Image.open(raster_source) as raster:
+                raster.load()
                 pixels = raster.size
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
@@ -263,6 +288,14 @@ def _validate_svg_embedded_rasters(
                     f"Embedded image {index} has effective resolution {effective_dpi:.1f} DPI; "
                     f"minimum is {spec.min_dpi} DPI",
                 )
+            if linked is not None:
+                linked_images.append(
+                    {
+                        "file": linked[1],
+                        "sha256": _sha256_file(linked[0]),
+                        **inspected_images[-1],
+                    }
+                )
         except (ImportError, OSError, ValueError) as error:
             report.add(
                 "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
@@ -271,6 +304,18 @@ def _validate_svg_embedded_rasters(
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
+    if linked_images:
+        report.metadata["svg_linked_images"] = linked_images
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:
