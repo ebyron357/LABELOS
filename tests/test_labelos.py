@@ -442,6 +442,52 @@ def test_qr_expected_value_is_decoded_from_svg(tmp_path):
     assert report.metadata["svg_embedded_images"][0]["dpi"] >= 300
 
 
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    qrcode.make("https://example.test/linked-svg-raster").save(assets / "qr.png")
+    artwork = tmp_path / "linked-qr.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" '
+            'viewBox="0 0 20 20"><image href="assets/qr.png" width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 20, "height_mm": 20}, tmp_path)
+
+    report = validate(spec)
+    manifest_path = create_package(spec, report, tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert report.passed
+    assert report.metadata["svg_raster_images"][0]["source"] == "assets/qr.png"
+    assert manifest["schema_version"] == 2
+    assert manifest["linked_assets"][0]["file"] == "assets/qr.png"
+    assert (tmp_path / "release" / "assets" / "qr.png").is_file()
+    assert verify_package(tmp_path / "release") == []
+    (tmp_path / "release" / "assets" / "qr.png").write_bytes(b"tampered")
+    assert "linked asset 1 checksum mismatch: assets/qr.png" in verify_package(tmp_path / "release")
+
+
+@pytest.mark.parametrize("href", ["../outside.png", "https://example.test/raster.png", "/tmp/raster.png"])
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "unsafe-link.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm">'
+            f'<image href="{href}" width="20mm" height="20mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 20, "height_mm": 20}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
 def test_under_resolution_embedded_svg_image_fails(tmp_path):
     image = qrcode.make("https://example.test/low-resolution")
     buffer = BytesIO()
