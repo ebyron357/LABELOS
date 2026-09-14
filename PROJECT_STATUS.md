@@ -89,10 +89,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-09-02 from the current production-readiness branch:
+Verified on 2026-09-14 at commit `3e5f423` from the current production-readiness branch:
 
 ```text
-python3 -m pytest -q                     # 65 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m pytest -q                     # 65 passed (two upstream FastAPI/Starlette deprecation warnings)
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests
 python3 -m pip check                     # passed
