@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Allow importing labelos when run from repo root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +49,7 @@ from labelos.security import resolve_under, sanitize_token
 configure_logging(os.environ.get("LABELOS_LOG_LEVEL", "INFO"))
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "scripts" / "generate_label.jsx"
+SUPPORTED_EXPORT_FORMATS = frozenset({"pdf", "ai", "png"})
 
 
 def _bridge_token() -> str:
@@ -73,6 +74,20 @@ class GenerateRequest(BaseModel):
     output_dir: str | None = None
     export_formats: list[str] = Field(default_factory=lambda: ["pdf"])
     dry_run: bool = False
+
+    @field_validator("export_formats")
+    @classmethod
+    def validate_export_formats(cls, formats: list[str]) -> list[str]:
+        normalized = [format_name.lower() for format_name in formats]
+        if not normalized:
+            raise ValueError("export_formats must contain at least one format")
+        unsupported = sorted(set(normalized) - SUPPORTED_EXPORT_FORMATS)
+        if unsupported:
+            raise ValueError(
+                f"Unsupported export format(s): {', '.join(unsupported)}; "
+                f"supported formats: {', '.join(sorted(SUPPORTED_EXPORT_FORMATS))}"
+            )
+        return normalized
 
 
 def illustrator_available() -> dict[str, Any]:
@@ -177,7 +192,35 @@ def run_illustrator_job(payload: dict[str, Any]) -> dict[str, Any]:
                 category=ARTWORK_GENERATION_ERROR,
                 details=result,
             )
+        _validate_generation_result(result, payload["exportFormats"])
         return result
+
+
+def _validate_generation_result(result: dict[str, Any], export_formats: list[str]) -> None:
+    """Reject malformed Illustrator success responses before they reach release workflow."""
+
+    outputs = result.get("outputs")
+    if not isinstance(outputs, list) or not outputs:
+        raise LabelosException(
+            "Illustrator reported success without generated outputs",
+            code="ILLUSTRATOR_NO_OUTPUTS",
+            category=ARTWORK_GENERATION_ERROR,
+        )
+    requested = set(export_formats)
+    for index, output in enumerate(outputs, start=1):
+        if not isinstance(output, dict):
+            raise LabelosException(
+                f"Illustrator output {index} is invalid",
+                code="ILLUSTRATOR_INVALID_OUTPUT",
+                category=ARTWORK_GENERATION_ERROR,
+            )
+        output_format = output.get("format")
+        if not isinstance(output_format, str) or output_format.lower() not in requested:
+            raise LabelosException(
+                f"Illustrator output {index} has an unexpected format: {output_format!r}",
+                code="ILLUSTRATOR_INVALID_OUTPUT",
+                category=ARTWORK_GENERATION_ERROR,
+            )
 
 
 def create_bridge_app() -> FastAPI:

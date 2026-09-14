@@ -31,8 +31,9 @@ they are **not** required to use LABELOS on production artwork today.
 | Unsafe filename/path rejection | **AVAILABLE NOW** |
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
+| API release integrity gate | **AVAILABLE NOW** (a current successful package verification and an approval bound to the exact packaged-artwork checksum are required before release) |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (plain relative, non-symlink files beneath the artwork directory are decoded, DPI-checked, checksummed, and packaged) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -47,10 +48,10 @@ they are **not** required to use LABELOS on production artwork today.
 
 ```text
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python -m labelos doctor --json
+python -m labelos validate examples/label.json --json
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release
 ```
 
 ## Known real blockers
@@ -89,20 +90,29 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-14 from the active production-readiness branch:
 
 ```text
-python -m pytest -q                      # 52 passed
+python3 -m pytest -q                     # 74 passed (two upstream FastAPI/Starlette deprecation warnings)
 python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check                     # passed
+python3 -m build --outdir /tmp/labelos-dist          # sdist and wheel passed
+python3 -m labelos doctor --json         # required tools available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING (expected exit 1)
+python3 -m labelos package examples/label.json storage/demo-release
+python3 -m labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
+
+This verification also covers relative linked SVG rasters: decoded-pixel/effective-DPI
+validation, release-package inclusion, and checksum tamper detection. The latest
+verification commit is recorded in `git log --oneline -1`.
+
+The API/Illustrator regression suite also verifies that releases cannot bypass or use
+stale package verification, approvals must provide the exact packaged-artwork checksum,
+repackaging invalidates prior verification/approval, and unsupported or empty Illustrator
+export-format requests are rejected before execution.
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.

@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from illustrator_bridge.server import create_bridge_app
+from illustrator_bridge.server import (
+    GenerateRequest,
+    _validate_generation_result,
+    create_bridge_app,
+)
+from labelos.errors import LabelosException
 
 
 @pytest.fixture()
@@ -113,3 +118,49 @@ def test_bridge_live_generate_fails_closed_without_illustrator(bridge):
     payload = response.json()
     assert payload["success"] is False
     assert payload["result"]["error"]["category"] == "ILLUSTRATOR_ERROR"
+
+
+@pytest.mark.parametrize("formats", ([], ["pfd"], ["pdf", "invalid"]))
+def test_bridge_rejects_empty_or_unsupported_export_formats(bridge, formats):
+    client, token = bridge
+
+    response = client.post(
+        "/generate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "product_data": product_payload(),
+            "template_path": "alternative-syrup.ai",
+            "dry_run": True,
+            "export_formats": formats,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_bridge_accepts_only_supported_export_formats():
+    request = GenerateRequest(
+        product_data=product_payload(),
+        template_path="alternative-syrup.ai",
+        export_formats=["PDF", "ai", "png"],
+    )
+
+    assert request.export_formats == ["pdf", "ai", "png"]
+
+
+@pytest.mark.parametrize(
+    "result,formats,code",
+    (
+        ({"success": True, "outputs": []}, ["pdf"], "ILLUSTRATOR_NO_OUTPUTS"),
+        ({"success": True, "outputs": [{"format": "svg"}]}, ["pdf"], "ILLUSTRATOR_INVALID_OUTPUT"),
+        ({"success": True, "outputs": [{"format": "pdf"}]}, ["pdf"], None),
+    ),
+)
+def test_bridge_validates_successful_illustrator_outputs(result, formats, code):
+    if code is None:
+        _validate_generation_result(result, formats)
+        return
+
+    with pytest.raises(LabelosException) as error:
+        _validate_generation_result(result, formats)
+    assert error.value.error.code == code

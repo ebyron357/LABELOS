@@ -13,7 +13,7 @@ Python 3.10 or newer is required.
 
 ```bash
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python -m labelos doctor --json
 ```
 
 `doctor` must show Pillow, PyMuPDF, and ZXing-C++ as available. Callas pdfToolbox is
@@ -25,12 +25,12 @@ expected. Do not treat it as a pass.
 1. **Install** LABELOS as above.
 2. **Prepare artwork** as SVG, PNG, or single-page PDF. Artwork size must include bleed.
 3. **Create a label spec** JSON file. Start from [`examples/label.json`](examples/label.json).
-4. **Validate:** `labelos validate examples/label.json --json`
+4. **Validate:** `python -m labelos validate examples/label.json --json`
 5. **Interpret errors.** Each issue has a `code` and `message`. See [Error codes](#error-codes).
 6. **Fix the artwork or spec.** Do not package a failing report.
 7. **Validate again** until the report shows `"passed": true`.
-8. **Package:** `labelos package examples/label.json releases/sku-revision`
-9. **Verify the package:** `labelos verify-package releases/sku-revision`
+8. **Package:** `python -m labelos package examples/label.json releases/sku-revision`
+9. **Verify the package:** `python -m labelos verify-package releases/sku-revision`
 10. **Release** only the verified package directory. Keep the artwork, `validation-report.json`,
     `label-spec.json`, and `manifest.json` together. Do not edit files after packaging.
 
@@ -98,6 +98,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_RASTER_IMAGE_INSPECTION_FAILED` | A placed SVG raster is unreadable, missing, unsafe, or outside the artwork directory |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
@@ -109,6 +110,11 @@ byte-count mismatches, and reports that do not record a pass.
 See [PROJECT_STATUS.md](PROJECT_STATUS.md) for **AVAILABLE NOW**, **PARTIAL**,
 **EXTERNAL DEPENDENCY**, and **FUTURE**. Commercial Callas/pdfToolbox preflight is
 **not available**.
+
+SVG artwork may reference a raster with a relative `href`, such as
+`assets/product.png`. LABELOS validates its decoded pixels and effective DPI, and
+includes it in the release package with its original relative path and checksum.
+Remote links, path traversal, and symlinks are rejected.
 
 ## Documentation
 

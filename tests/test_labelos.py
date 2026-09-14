@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,18 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_entrypoint_runs_operator_cli():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -534,6 +548,54 @@ def test_pdf_embedded_image_dpi_accepts_high_resolution_artwork(tmp_path):
 
     assert report.passed
     assert report.metadata["pdf"]["embedded_image_dpi"] == [600.0]
+
+
+def test_linked_svg_raster_is_validated_packaged_and_verified(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "product.png"
+    Image.new("RGB", (1200, 600), "white").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm">'
+            '<image href="assets/product.png" width="100mm" height="50mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/product.png"
+    manifest = create_package(spec, report, tmp_path / "release")
+    assert (manifest.parent / "assets" / "product.png").is_file()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "assets" / "product.png").write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked SVG asset 1 checksum mismatch: assets/product.png",
+        "linked SVG asset 1 byte count mismatch: assets/product.png",
+    ]
+
+
+def test_linked_svg_raster_must_be_safe_regular_local_file(tmp_path):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm">'
+            '<image href="../outside.png" width="100mm" height="50mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 100, "height_mm": 50}, tmp_path)
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["SVG_RASTER_IMAGE_INSPECTION_FAILED"]
 
 
 def test_cli_malformed_pdf_fails_closed(tmp_path, capsys):
