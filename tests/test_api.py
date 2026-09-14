@@ -44,6 +44,36 @@ def passing_config() -> dict:
     }
 
 
+def create_validated_job(
+    client: TestClient, token: str, *, sku: str = "ALT-SYR-MANGO-001", config: dict | None = None
+) -> str:
+    response = client.post(
+        "/jobs",
+        headers=auth(token),
+        json={
+            "config": config or passing_config(),
+            "product_data": {
+                "product": {
+                    "brand": "ALTERNATIVE",
+                    "name": "Mango Syrup",
+                    "sku": sku,
+                    "revision": "1.0",
+                },
+                "label": {
+                    "template": "alternative-syrup.ai",
+                    "width_mm": 100,
+                    "height_mm": 50,
+                    "bleed_mm": 3,
+                },
+                "copy": {"product_name": "Example Product", "net_weight": "NET 250 g"},
+            },
+            "auto_validate": True,
+        },
+    )
+    assert response.status_code == 200
+    return response.json()["job_id"]
+
+
 def test_health_is_public(api_env):
     client, _, _, _ = api_env
     response = client.get("/health")
@@ -284,3 +314,176 @@ def test_approval_checksum_mismatch_rejected(api_env):
     )
     assert bad.status_code == 400
     assert bad.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+
+
+def test_approval_requires_successful_package_verification(api_env):
+    client, token, _, service = api_env
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+
+    approval = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    )
+
+    assert approval.status_code == 400
+    assert approval.json()["result"]["error"]["code"] == "APPROVAL_STATE"
+
+
+def test_release_requires_successful_current_verification(api_env):
+    client, token, _, service = api_env
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    # Simulate a legacy state created by the previously permitted direct approval path.
+    job["status"] = "APPROVED_FOR_PRODUCTION"
+    job["approval_result"] = {"approved": True, "artwork_checksum": job["package_artwork_checksum"]}
+    service.jobs.save(job)
+
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_REQUIRED"
+
+
+def test_release_rejects_tampered_package_after_verification(api_env):
+    client, token, _, service = api_env
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    packaged_artwork = next(Path(job["package_path"]).glob("*.svg"))
+    packaged_artwork.write_text("tampered", encoding="utf-8")
+    assert client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    ).status_code == 200
+
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_REQUIRED"
+
+
+def test_failed_job_verification_is_persisted_as_failed(api_env):
+    client, token, _, service = api_env
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    next(Path(job["package_path"]).glob("*.svg")).write_text("tampered", encoding="utf-8")
+
+    verification = client.post("/verify-package", headers=auth(token), json={"job_id": job_id})
+
+    assert verification.status_code == 400
+    job = service.jobs.get(job_id)
+    assert job["status"] == "PACKAGE_VERIFICATION_FAILED"
+    assert job["package_verification"] == {"passed": False}
+
+
+def test_release_rejects_stale_verification_identity(api_env):
+    client, token, _, service = api_env
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    job["package_verification"]["manifest_checksum"] = "0" * 64
+    service.jobs.save(job)
+    assert client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    ).status_code == 200
+
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_STALE"
+
+
+def test_approval_requires_exact_current_packaged_artwork_checksum(api_env):
+    client, token, _, service = api_env
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+
+    missing = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True},
+    )
+    assert missing.status_code == 400
+    assert missing.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_REQUIRED"
+
+    stale = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": "0" * 64},
+    )
+    assert stale.status_code == 400
+    assert stale.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+
+    exact = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    )
+    assert exact.status_code == 200
+
+
+def test_approval_uses_artwork_bytes_packaged_after_source_changes(api_env, tmp_path):
+    client, token, _, service = api_env
+    artwork = tmp_path / "label.svg"
+    artwork.write_bytes((ROOT / "fixtures" / "passing-label.svg").read_bytes())
+    config = passing_config()
+    config["artwork"] = str(artwork)
+    job_id = create_validated_job(client, token, config=config)
+    source_checksum = service.jobs.get(job_id)["artwork_checksum"]
+    artwork.write_text(artwork.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    assert job["package_artwork_checksum"] != source_checksum
+
+    stale = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": source_checksum},
+    )
+    assert stale.status_code == 400
+    assert stale.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+
+    exact = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": job["package_artwork_checksum"]},
+    )
+    assert exact.status_code == 200
+
+
+def test_repackaging_invalidates_verification_and_approval(api_env, monkeypatch, tmp_path):
+    client, token, storage, service = api_env
+    destinations = iter((tmp_path / "first-package", tmp_path / "second-package"))
+    monkeypatch.setattr(storage, "release_dir", lambda *_args: next(destinations))
+    job_id = create_validated_job(client, token)
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    first = service.jobs.get(job_id)
+    assert client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": first["package_artwork_checksum"]},
+    ).status_code == 200
+
+    repackaged = client.post("/package", headers=auth(token), json={"job_id": job_id})
+
+    assert repackaged.status_code == 200
+    job = service.jobs.get(job_id)
+    assert job["status"] == "TECHNICALLY_VALIDATED"
+    assert job["package_verification"] is None
+    assert job["approval_result"] is None
+    assert job["timestamps"]["verified_at"] is None
+    assert job["timestamps"]["approval_at"] is None
