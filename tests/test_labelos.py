@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -316,6 +318,16 @@ def test_verify_package_rejects_byte_count_mismatch(tmp_path):
     assert verify_package(manifest.parent) == ["label_spec byte count mismatch: label-spec.json"]
 
 
+def test_verify_package_remains_compatible_with_schema_one_packages(tmp_path):
+    manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    data.pop("artwork_assets")
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    assert not verify_package(manifest.parent)
+
+
 def test_verify_package_rejects_tampered_validation_report(tmp_path):
     manifest = create_package(passing_spec(), validate(passing_spec()), tmp_path / "release")
     report_path = manifest.parent / "validation-report.json"
@@ -367,6 +379,18 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["ZXing-C++"]["available"] is True
     assert result["tools"]["Callas pdfToolbox"]["available"] is False
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
+
+
+def test_python_module_invokes_operator_cli():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["passed"] is True
 
 
 def test_qr_expected_value_is_decoded(tmp_path):
@@ -465,6 +489,70 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_dpi_is_enforced_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "product.png"
+    Image.new("RGB", (600, 600), "black").save(raster)
+    artwork = tmp_path / "linked-raster.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25mm" height="25mm">'
+            '<image href="assets/product.png" width="25mm" height="25mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25, "height_mm": 25, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/product.png"
+    assert (manifest.parent / "assets" / "product.png").read_bytes() == raster.read_bytes()
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert set(manifest_data["artwork_assets"]) == {"assets/product.png"}
+    assert not verify_package(manifest.parent)
+
+
+def test_linked_svg_raster_under_resolution_fails(tmp_path):
+    Image.new("RGB", (50, 50), "black").save(tmp_path / "low.png")
+    artwork = tmp_path / "linked-raster.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25mm" height="25mm">'
+            '<image href="low.png" width="25mm" height="25mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 25, "height_mm": 25, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_path_escape_or_symlink_is_rejected(tmp_path):
+    outside = tmp_path.parent / "outside.png"
+    Image.new("RGB", (600, 600), "black").save(outside)
+    artwork = tmp_path / "linked-raster.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="25mm" height="25mm">'
+            '<image href="../outside.png" width="25mm" height="25mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict({"artwork": artwork.name, "width_mm": 25, "height_mm": 25}, tmp_path)
+
+    assert any(issue.code == "SVG_LINKED_IMAGE_UNSAFE_PATH" for issue in validate(spec).issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
