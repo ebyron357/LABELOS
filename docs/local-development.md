@@ -7,25 +7,25 @@
 ## Setup
 
 ```bash
-python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python3 -m pip install -e ".[test,dev]"
+python3 -m labelos doctor --json
 ```
 
 ## Operator CLI
 
 ```bash
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python3 -m labelos validate examples/label.json --json
+python3 -m labelos package examples/label.json storage/demo-release
+python3 -m labelos verify-package storage/demo-release
 ```
 
 ## Tests
 
 ```bash
-python -m pytest
-python -m ruff check .
-python -m compileall -q labelos tests
-python -m build
+python3 -m pytest
+python3 -m ruff check .
+python3 -m compileall -q labelos tests
+python3 -m build
 ```
 
 ## Optional automation (future)

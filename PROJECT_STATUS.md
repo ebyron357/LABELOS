@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: the current `cursor/label-production-system-readiness-*` branch.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (only local, non-symlink relative files under the SVG directory are accepted, DPI-checked, and release-packaged) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -46,11 +46,11 @@ they are **not** required to use LABELOS on production artwork today.
 ## Operator path (use this)
 
 ```text
-python -m pip install -e ".[test,dev]"
-labelos doctor --json
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python3 -m pip install -e ".[test,dev]"
+python3 -m labelos doctor --json
+python3 -m labelos validate examples/label.json --json
+python3 -m labelos package examples/label.json storage/demo-release
+python3 -m labelos verify-package storage/demo-release
 ```
 
 ## Known real blockers
@@ -97,12 +97,33 @@ python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
 python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python3 -m labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json storage/demo-release
+python3 -m labelos verify-package storage/demo-release          # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Latest verification
+
+Verified on 2026-09-14 after linked-SVG-raster packaging and module CLI support:
+
+```text
+python3 -m pytest -q                                      # 61 passed
+python3 -m ruff check .                                   # passed
+python3 -m compileall -q labelos illustrator_bridge tests # passed
+python3 -m pip check                                      # passed
+python3 -m build                                          # sdist and wheel passed
+python3 -m labelos doctor --json                          # required tools available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json    # PASS
+python3 -m labelos validate examples/failing-label.json --json # expected REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json <temp>     # PASS
+python3 -m labelos verify-package <temp>                  # PASS
+```
+
+The approved printer profile, Illustrator workstation/template, Callas profile, and
+an OCR product decision for outlined/raster-only required copy remain genuine
+human/external blockers.
