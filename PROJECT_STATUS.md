@@ -105,6 +105,8 @@ python3 -m labelos verify-package /tmp/labelos-e2e-release-1789377110 # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
+Verified implementation commit: `c33fdd9`.
+
 SVG release packages with linked rasters use manifest schema 2. Referenced relative
 paths and checksums are included in the package and revalidated; schema-1 packages
 remain verifiable. Packaging refuses artwork or linked raster assets changed after
