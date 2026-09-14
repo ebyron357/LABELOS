@@ -49,6 +49,7 @@ from labelos.security import resolve_under, sanitize_token
 configure_logging(os.environ.get("LABELOS_LOG_LEVEL", "INFO"))
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "scripts" / "generate_label.jsx"
+SUPPORTED_EXPORT_FORMATS = frozenset({"pdf", "ai", "png"})
 
 
 def _bridge_token() -> str:
@@ -123,6 +124,61 @@ def build_extendscript_payload(
     }
 
 
+def validate_export_formats(export_formats: list[str]) -> list[str]:
+    """Normalize and reject unsupported Illustrator export requests before execution."""
+
+    formats = [value.lower() for value in export_formats if isinstance(value, str)]
+    if not formats:
+        raise LabelosException(
+            "At least one export format is required",
+            code="EXPORT_FORMATS_REQUIRED",
+            category=INPUT_ERROR,
+        )
+    unsupported = sorted(set(formats) - SUPPORTED_EXPORT_FORMATS)
+    if unsupported or len(formats) != len(export_formats):
+        raise LabelosException(
+            f"Unsupported export format(s): {', '.join(unsupported) or 'non-string value'}",
+            code="EXPORT_FORMAT_UNSUPPORTED",
+            category=INPUT_ERROR,
+        )
+    return formats
+
+
+def validate_illustrator_result(result: dict[str, Any], requested_formats: list[str]) -> None:
+    """Reject a nominal success that did not create requested, supported outputs."""
+
+    outputs = result.get("outputs")
+    if not isinstance(outputs, list) or not outputs:
+        raise LabelosException(
+            "Illustrator reported success without generated outputs",
+            code="ILLUSTRATOR_ZERO_OUTPUTS",
+            category=ARTWORK_GENERATION_ERROR,
+        )
+    returned_formats = []
+    for output in outputs:
+        if not isinstance(output, dict) or not isinstance(output.get("format"), str):
+            raise LabelosException(
+                "Illustrator returned an invalid output record",
+                code="ILLUSTRATOR_OUTPUT_INVALID",
+                category=ARTWORK_GENERATION_ERROR,
+            )
+        output_format = output["format"].lower()
+        if output_format not in SUPPORTED_EXPORT_FORMATS or output_format not in requested_formats:
+            raise LabelosException(
+                f"Illustrator returned unexpected output format: {output_format}",
+                code="ILLUSTRATOR_OUTPUT_INVALID",
+                category=ARTWORK_GENERATION_ERROR,
+            )
+        returned_formats.append(output_format)
+    missing = sorted(set(requested_formats) - set(returned_formats))
+    if missing:
+        raise LabelosException(
+            f"Illustrator did not return requested output format(s): {', '.join(missing)}",
+            code="ILLUSTRATOR_OUTPUT_INVALID",
+            category=ARTWORK_GENERATION_ERROR,
+        )
+
+
 def run_illustrator_job(payload: dict[str, Any]) -> dict[str, Any]:
     status = illustrator_available()
     if not status.get("available"):
@@ -177,6 +233,7 @@ def run_illustrator_job(payload: dict[str, Any]) -> dict[str, Any]:
                 category=ARTWORK_GENERATION_ERROR,
                 details=result,
             )
+        validate_illustrator_result(result, payload["exportFormats"])
         return result
 
 
@@ -232,6 +289,7 @@ def create_bridge_app() -> FastAPI:
     async def generate(body: GenerateRequest) -> dict[str, Any]:
         with log_operation("illustrator.generate", dry_run=body.dry_run):
             record = parse_product_record(body.product_data)
+            export_formats = validate_export_formats(body.export_formats)
             template_name = sanitize_token(Path(body.template_path).name, field="template")
             # Template may be provided as absolute under templates root or relative name.
             if Path(body.template_path).is_absolute():
@@ -276,7 +334,7 @@ def create_bridge_app() -> FastAPI:
                 template=template if template.is_file() else templates_root / record.label.template,
                 output_dir=job_out,
                 variables=variables,
-                export_formats=body.export_formats,
+                export_formats=export_formats,
                 barcode_value=record.codes.barcode,
                 qr_value=record.codes.qr,
             )

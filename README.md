@@ -13,7 +13,7 @@ Python 3.10 or newer is required.
 
 ```bash
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python -m labelos doctor --json
 ```
 
 `doctor` must show Pillow, PyMuPDF, and ZXing-C++ as available. Callas pdfToolbox is
@@ -39,16 +39,16 @@ expected. Do not treat it as a pass.
 The bundled example is a 100 × 50 mm trim label with 3 mm bleed (artwork 106 × 56 mm):
 
 ```bash
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python -m labelos validate examples/label.json --json
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release
 ```
 
 A known failing spec is [`examples/failing-label.json`](examples/failing-label.json)
 (`REQUIRED_COPY_MISSING`). Use it to see how errors look:
 
 ```bash
-labelos validate examples/failing-label.json --json
+python -m labelos validate examples/failing-label.json --json
 ```
 
 ### Label spec fields
@@ -84,6 +84,8 @@ codes must decode to an expected string.
 `package` refuses to write over an existing destination and refuses failed reports.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
+The installed `labelos` command and `python -m labelos` provide the same interface;
+the module form is useful where a user-level scripts directory is not on `PATH`.
 
 ## Error codes
 

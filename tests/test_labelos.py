@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -367,6 +369,19 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["ZXing-C++"]["available"] is True
     assert result["tools"]["Callas pdfToolbox"]["available"] is False
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
+
+
+def test_module_cli_is_available_without_console_script_path():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["passed"] is True
 
 
 def test_qr_expected_value_is_decoded(tmp_path):
