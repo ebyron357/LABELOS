@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from illustrator_bridge.server import create_bridge_app
+from illustrator_bridge.server import (
+    create_bridge_app,
+    validate_export_formats,
+    validate_illustrator_result,
+)
+from labelos.errors import LabelosException
 
 
 @pytest.fixture()
@@ -113,3 +118,46 @@ def test_bridge_live_generate_fails_closed_without_illustrator(bridge):
     payload = response.json()
     assert payload["success"] is False
     assert payload["result"]["error"]["category"] == "ILLUSTRATOR_ERROR"
+
+
+@pytest.mark.parametrize("formats", [[], ["pfd"], ["pdf", "tiff"]])
+def test_bridge_rejects_empty_or_unsupported_export_formats(bridge, formats):
+    client, token = bridge
+
+    response = client.post(
+        "/generate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "product_data": product_payload(),
+            "template_path": "alternative-syrup.ai",
+            "dry_run": True,
+            "export_formats": formats,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["result"]["error"]["code"] in {
+        "EXPORT_FORMATS_REQUIRED",
+        "EXPORT_FORMAT_UNSUPPORTED",
+    }
+
+
+def test_bridge_normalizes_supported_export_formats():
+    assert validate_export_formats(["PDF", "ai", "png"]) == ["pdf", "ai", "png"]
+
+
+def test_bridge_rejects_successful_illustrator_result_without_outputs():
+    with pytest.raises(LabelosException) as error:
+        validate_illustrator_result({"success": True, "outputs": []}, ["pdf"])
+
+    assert error.value.error.code == "ILLUSTRATOR_ZERO_OUTPUTS"
+
+
+def test_bridge_rejects_unrequested_illustrator_output_format():
+    with pytest.raises(LabelosException) as error:
+        validate_illustrator_result(
+            {"success": True, "outputs": [{"format": "png"}]},
+            ["pdf"],
+        )
+
+    assert error.value.error.code == "ILLUSTRATOR_OUTPUT_INVALID"

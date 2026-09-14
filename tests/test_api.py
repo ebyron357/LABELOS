@@ -284,3 +284,77 @@ def test_approval_checksum_mismatch_rejected(api_env):
     )
     assert bad.status_code == 400
     assert bad.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_MISMATCH"
+
+
+def test_approval_requires_successful_package_verification(api_env):
+    client, token, _, service = api_env
+    create = client.post("/jobs", headers=auth(token), json={"config": passing_config(), "auto_validate": True})
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+
+    no_verification = client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={"approver": "qa", "approved": True, "artwork_checksum": "0" * 64},
+    )
+
+    assert no_verification.status_code == 400
+    assert no_verification.json()["result"]["error"]["code"] == "APPROVAL_STATE"
+    assert service.jobs.get(job_id)["package_verification"] is None
+
+
+def test_approval_requires_explicit_packaged_artwork_checksum(api_env):
+    client, token, _, service = api_env
+    create = client.post("/jobs", headers=auth(token), json={"config": passing_config(), "auto_validate": True})
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+
+    missing = client.post(
+        f"/jobs/{job_id}/approve", headers=auth(token), json={"approver": "qa", "approved": True}
+    )
+
+    assert missing.status_code == 400
+    assert missing.json()["result"]["error"]["code"] == "APPROVAL_CHECKSUM_REQUIRED"
+    assert service.jobs.get(job_id)["approval_result"] is None
+
+
+def test_release_rejects_stale_verified_package(api_env):
+    client, token, _, service = api_env
+    create = client.post("/jobs", headers=auth(token), json={"config": passing_config(), "auto_validate": True})
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    assert client.post("/verify-package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    assert client.post(
+        f"/jobs/{job_id}/approve",
+        headers=auth(token),
+        json={
+            "approver": "qa",
+            "approved": True,
+            "artwork_checksum": job["package_artwork_checksum"],
+        },
+    ).status_code == 200
+    Path(job["package_path"], "passing-label.svg").write_text("tampered", encoding="utf-8")
+
+    release = client.post(f"/jobs/{job_id}/release", headers=auth(token))
+
+    assert release.status_code == 400
+    assert release.json()["result"]["error"]["code"] == "RELEASE_VERIFICATION_STALE"
+
+
+def test_failed_job_package_verification_clears_verification_state(api_env):
+    client, token, _, service = api_env
+    create = client.post("/jobs", headers=auth(token), json={"config": passing_config(), "auto_validate": True})
+    job_id = create.json()["job_id"]
+    assert client.post("/package", headers=auth(token), json={"job_id": job_id}).status_code == 200
+    job = service.jobs.get(job_id)
+    Path(job["package_path"], "passing-label.svg").write_text("tampered", encoding="utf-8")
+
+    verification = client.post("/verify-package", headers=auth(token), json={"job_id": job_id})
+
+    assert verification.status_code == 400
+    assert verification.json()["result"]["error"]["code"] == "PACKAGE_VERIFICATION_FAILED"
+    stored = service.jobs.get(job_id)
+    assert stored["status"] == "PACKAGE_VERIFICATION_FAILED"
+    assert stored["package_verification"] is None
