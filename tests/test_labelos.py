@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,19 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_entry_point_runs_doctor():
+    completed = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert json.loads(completed.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +480,77 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "high-resolution.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/high-resolution.png" '
+            'width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    manifest = create_package(spec, report, tmp_path / "release")
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["file"] == "assets/high-resolution.png"
+    assert (manifest.parent / "assets" / "high-resolution.png").is_file()
+    assert not verify_package(manifest.parent)
+
+
+def test_linked_svg_raster_rejects_unsafe_or_low_resolution_reference(tmp_path):
+    raster = tmp_path / "low-resolution.png"
+    Image.new("RGB", (72, 72), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="../low-resolution.png" '
+            'width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_linked_svg_raster_low_dpi_fails(tmp_path):
+    raster = tmp_path / "low-resolution.png"
+    Image.new("RGB", (72, 72), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="low-resolution.png" '
+            'width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
