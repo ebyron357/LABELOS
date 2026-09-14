@@ -89,10 +89,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-09-02 from the current production-readiness branch:
+Verified on 2026-09-14 from the current production-readiness branch:
 
 ```text
-python3 -m pytest -q                     # 65 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m pytest -q                     # 65 passed (two upstream FastAPI/Starlette deprecation warnings)
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests
 python3 -m pip check                     # passed
@@ -100,8 +100,8 @@ python3 -m build                         # sdist and wheel in dist/
 python3 -m labelos doctor --json         # Callas SKIPPED_NOT_CONFIGURED
 python3 -m labelos validate examples/label.json --json          # PASS
 python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-python3 -m labelos package examples/label.json storage/linked-raster-release
-python3 -m labelos verify-package storage/linked-raster-release # PASS
+python3 -m labelos package examples/label.json /tmp/labelos-e2e-release-1789377110
+python3 -m labelos verify-package /tmp/labelos-e2e-release-1789377110 # PASS
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
