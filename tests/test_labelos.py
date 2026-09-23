@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,18 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_python_module_entry_point_runs_doctor():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +479,83 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_validated_packaged_and_verified(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "product.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+            '<image href="assets/product.png" x="40mm" y="15mm" width="20mm" height="20mm"/>'
+            "</svg>"
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    linked = report.metadata["svg_linked_images"][0]
+    assert linked["source"] == "assets/product.png"
+    assert linked["dpi"] >= 300
+    manifest = create_package(spec, report, tmp_path / "release")
+    package = json.loads(manifest.read_text(encoding="utf-8"))
+    assert "assets/product.png" in package["linked_assets"]
+    assert (manifest.parent / "assets" / "product.png").is_file()
+    assert not verify_package(manifest.parent)
+    (manifest.parent / "assets" / "product.png").write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked_asset:assets/product.png checksum mismatch: assets/product.png",
+        "linked_asset:assets/product.png byte count mismatch: assets/product.png",
+    ]
+
+
+def test_linked_svg_raster_change_after_validation_blocks_package(tmp_path):
+    raster = tmp_path / "product.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+            '<image href="product.png" width="20mm" height="20mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+    report = validate(spec)
+    assert report.passed
+    Image.new("RGB", (1200, 1200), "white").save(raster)
+
+    with pytest.raises(ValueError, match="Linked raster asset changed after validation"):
+        create_package(spec, report, tmp_path / "release")
+
+
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+            '<image href="https://example.test/product.png" width="20mm" height="20mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["SVG_LINKED_IMAGE_INSPECTION_FAILED"]
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
