@@ -277,6 +277,30 @@ def test_package_refuses_failed_report(tmp_path):
         create_package(spec, report, tmp_path / "release")
 
 
+def test_artwork_changes_after_validation_block_packaging(tmp_path):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm">'
+        "<text>Original copy</text></svg>",
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "required_copy": ["Original copy"]},
+        tmp_path,
+    )
+    report = validate(spec)
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm">'
+        "<text>Changed copy</text></svg>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Artwork changed after validation"):
+        create_package(spec, report, tmp_path / "release")
+
+    assert not (tmp_path / "release").exists()
+
+
 def test_package_rejects_unsafe_extra_filename(tmp_path):
     spec = passing_spec()
     report = validate(spec)

@@ -26,6 +26,7 @@ def create_package(
     """Create an immutable-style package directory and return its manifest path."""
     if not report.passed:
         raise ValueError("Refusing to package artwork with validation errors")
+    _assert_artwork_unchanged(spec, report)
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError(f"Package destination already exists: {destination}")
@@ -124,6 +125,14 @@ def _assert_package_filename(filename: str, extra: bool = False) -> None:
 
 def _manifest_entry(path: Path) -> dict[str, str | int]:
     return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
+
+
+def _assert_artwork_unchanged(spec: LabelSpec, report: Report) -> None:
+    digest = report.metadata.get("artwork_sha256")
+    if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+        raise ValueError("Validation report has invalid artwork checksum")
+    if sha256_file(spec.artwork) != digest:
+        raise ValueError("Artwork changed after validation")
 
 
 def _copy_linked_svg_assets(spec: LabelSpec, report: Report, destination: Path) -> dict[str, Any]:

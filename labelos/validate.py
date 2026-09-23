@@ -27,6 +27,11 @@ def validate(spec: LabelSpec) -> Report:
     if not spec.artwork.is_file():
         report.add("ARTWORK_MISSING", "error", "Artwork file does not exist", str(spec.artwork))
         return report
+    try:
+        report.metadata["artwork_sha256"] = _file_sha256(spec.artwork)
+    except OSError as error:
+        report.add("ARTWORK_UNREADABLE", "error", f"Artwork file could not be read: {error}")
+        return report
 
     suffix = spec.artwork.suffix.lower()
     validators: dict[str, Callable[[LabelSpec, Report], str]] = {
@@ -45,6 +50,14 @@ def validate(spec: LabelSpec) -> Report:
     report.metadata["spec"] = spec.to_dict(artwork=spec.artwork.name)
     report.metadata["preflight"] = get_preflight_adapter().run(str(spec.artwork)).to_dict()
     return report
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _validate_png(spec: LabelSpec, report: Report) -> str:
