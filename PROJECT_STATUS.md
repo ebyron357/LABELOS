@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative files are DPI-checked, checksummed, and included in release packages; remote, absolute, traversal, fragment/query, missing, and symlink references are rejected) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,14 +89,14 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-23 from branch `cursor/label-production-system-readiness-4d86`:
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
+python3 -m pytest -q                      # 62 passed
+python3 -m ruff check .                   # passed
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check                      # passed
+python3 -m build --outdir /tmp/labelos-dist # sdist and wheel passed
 labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
 labelos validate examples/label.json --json          # PASS
 labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
@@ -106,3 +106,24 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+Latest release hardening: linked SVG raster references must be plain relative paths
+below the artwork directory. Their effective DPI and SHA-256 are recorded during
+validation; schema-2 release packages copy and checksum those assets, and refuse
+packaging if they changed after validation.
+
+## Latest complete verification
+
+Run on 2026-09-23 against source commit `334e83b`:
+
+- `doctor --json`: Pillow, PyMuPDF, and ZXing-C++ available; Callas
+  `SKIPPED_NOT_CONFIGURED`.
+- Passing fixture validation, package creation, and package verification: passed.
+- Failing fixture: correctly failed with `REQUIRED_COPY_MISSING`.
+- Test suite: **62 passed** (one upstream FastAPI/Starlette deprecation warning).
+- Ruff, bytecode compilation, dependency consistency, and sdist/wheel build: passed.
+
+The remaining production blockers are genuinely external or approval-dependent:
+licensed/configured Callas and its profile, an approved printer profile for
+printer-specific color/overprint rules, an Illustrator workstation/template, and a
+product decision on OCR for outlined or raster-only required copy.
