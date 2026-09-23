@@ -70,7 +70,9 @@ labelos validate examples/failing-label.json --json
 
 `width_mm` / `height_mm` are the **trim** size. Artwork file dimensions must equal
 trim plus bleed on all sides. Set `barcode_value` and/or `qr_value` only when those
-codes must decode to an expected string.
+codes must decode to an expected string. SVG-linked raster images must use safe local
+relative paths below the SVG directory; LABELOS validates their effective DPI and
+includes their checksummed bytes in the release package.
 
 ## Commands
 
@@ -98,6 +100,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | A linked SVG raster is unsafe, missing, unreadable, or cannot be inspected |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
