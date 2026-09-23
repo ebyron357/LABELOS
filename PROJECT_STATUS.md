@@ -24,7 +24,7 @@ they are **not** required to use LABELOS on production artwork today.
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
 | Validation reports | **AVAILABLE NOW** |
-| Release package generation | **AVAILABLE NOW** |
+| Release package generation | **AVAILABLE NOW** (refuses artwork or linked-asset bytes changed after validation) |
 | SHA-256 integrity | **AVAILABLE NOW** |
 | Manifest validation | **AVAILABLE NOW** |
 | Package tamper detection | **AVAILABLE NOW** |
@@ -89,21 +89,21 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-09-23:
+Verified on 2026-09-23 from implementation commit `c32f67c`:
 
 ```text
-python -m pytest -q                      # 62 passed
+python3 -m pytest -q                     # 63 passed
 python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check                     # passed
+python3 -m build                          # sdist and wheel in dist/
+python3 -m labelos.cli doctor --json      # Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos.cli validate examples/label.json --json          # PASS
+python3 -m labelos.cli validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
+python3 -m labelos.cli package examples/label.json /tmp/labelos-e2e-release --json
+python3 -m labelos.cli verify-package /tmp/labelos-e2e-release --json  # PASS
 # linked local SVG rasters: placement DPI + checksums enforced and assets package with artwork
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+# changed artwork or linked asset after validation: packaging refused, PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.

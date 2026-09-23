@@ -83,7 +83,8 @@ includes their checksummed bytes in the release package.
 | `labelos verify-package DESTINATION [--json]` | Check package checksums, paths, and passing status |
 | `labelos doctor [--json]` | Report required and optional tools |
 
-`package` refuses to write over an existing destination and refuses failed reports.
+`package` refuses to write over an existing destination and refuses failed reports or artwork
+whose bytes changed since validation.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
 
@@ -95,6 +96,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `FORMAT_UNSUPPORTED` | Not SVG, PNG, or PDF |
 | `SVG_INVALID` / `PNG_INVALID` / `PDF_INVALID` | File is malformed; validation failed closed |
 | `SVG_UNSAFE_XML` | SVG declares a DOCTYPE/entity; flatten the file so copy is literal text |
+| `ARTWORK_UNREADABLE` | Artwork could not be read, so validation failed closed |
 | `PNG_READER_UNAVAILABLE` | Pillow is missing, so PNG image data cannot be inspected |
 | `SVG_DIMENSIONS_MISSING` | SVG width/height must use mm, cm, in, or pt |
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
