@@ -496,7 +496,8 @@ def test_linked_svg_raster_is_validated_and_packaged(tmp_path):
     assert manifest["assets"]["assets/product.png"]["sha256"] == linked_image["sha256"]
     assert (manifest_path.parent / "assets/product.png").is_file()
     assert verify_package(manifest_path.parent) == []
-    (manifest_path.parent / "assets/product.png").write_bytes(b"changed")
+    packaged_asset = manifest_path.parent / "assets/product.png"
+    packaged_asset.write_bytes(b"x" * packaged_asset.stat().st_size)
     assert verify_package(manifest_path.parent) == ["asset:assets/product.png checksum mismatch: assets/product.png"]
 
 
