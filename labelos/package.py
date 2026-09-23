@@ -204,11 +204,11 @@ def _copy_validated_linked_assets(
     assets: dict[str, dict[str, str | int]] = {}
     linked_images = report.metadata.get("svg_linked_images", [])
     if not isinstance(linked_images, list):
-        raise ValueError("Validation report linked-image metadata is invalid")
+        raise TypeError("Validation report linked-image metadata is invalid")
     artwork_root = spec.artwork.parent.resolve()
     for image in linked_images:
         if not isinstance(image, dict):
-            raise ValueError("Validation report linked-image metadata is invalid")
+            raise TypeError("Validation report linked-image metadata is invalid")
         filename, digest = image.get("file"), image.get("sha256")
         if not isinstance(filename, str) or not _is_package_filename(filename):
             raise ValueError("Validation report contains an unsafe linked-image path")

@@ -10,8 +10,7 @@ from collections.abc import Callable
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import urlsplit
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
