@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local raster links are checked, checksummed, and packaged; remote, traversal, query/fragment, missing, and symlinked links are rejected) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,10 +89,10 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-09-23:
 
 ```text
-python -m pytest -q                      # 52 passed
+python -m pytest -q                      # 62 passed
 python -m ruff check .                   # passed
 python -m compileall -q labelos illustrator_bridge tests
 python -m pip check                      # passed
@@ -102,6 +102,7 @@ labelos validate examples/label.json --json          # PASS
 labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
 labelos package examples/label.json storage/demo-release
 labelos verify-package storage/demo-release          # PASS
+# linked local SVG rasters: placement DPI + checksums enforced and assets package with artwork
 # after tampering artwork: checksum + byte-count mismatch, FAIL
 ```
 
