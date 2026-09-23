@@ -111,3 +111,19 @@ Latest release hardening: linked SVG raster references must be plain relative pa
 below the artwork directory. Their effective DPI and SHA-256 are recorded during
 validation; schema-2 release packages copy and checksum those assets, and refuse
 packaging if they changed after validation.
+
+## Latest complete verification
+
+Run on 2026-09-23 against source commit `334e83b`:
+
+- `doctor --json`: Pillow, PyMuPDF, and ZXing-C++ available; Callas
+  `SKIPPED_NOT_CONFIGURED`.
+- Passing fixture validation, package creation, and package verification: passed.
+- Failing fixture: correctly failed with `REQUIRED_COPY_MISSING`.
+- Test suite: **62 passed** (one upstream FastAPI/Starlette deprecation warning).
+- Ruff, bytecode compilation, dependency consistency, and sdist/wheel build: passed.
+
+The remaining production blockers are genuinely external or approval-dependent:
+licensed/configured Callas and its profile, an approved printer profile for
+printer-specific color/overprint rules, an Illustrator workstation/template, and a
+product decision on OCR for outlined or raster-only required copy.
