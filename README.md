@@ -13,7 +13,7 @@ Python 3.10 or newer is required.
 
 ```bash
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python -m labelos doctor --json
 ```
 
 `doctor` must show Pillow, PyMuPDF, and ZXing-C++ as available. Callas pdfToolbox is
@@ -25,12 +25,12 @@ expected. Do not treat it as a pass.
 1. **Install** LABELOS as above.
 2. **Prepare artwork** as SVG, PNG, or single-page PDF. Artwork size must include bleed.
 3. **Create a label spec** JSON file. Start from [`examples/label.json`](examples/label.json).
-4. **Validate:** `labelos validate examples/label.json --json`
+4. **Validate:** `python -m labelos validate examples/label.json --json`
 5. **Interpret errors.** Each issue has a `code` and `message`. See [Error codes](#error-codes).
 6. **Fix the artwork or spec.** Do not package a failing report.
 7. **Validate again** until the report shows `"passed": true`.
-8. **Package:** `labelos package examples/label.json releases/sku-revision`
-9. **Verify the package:** `labelos verify-package releases/sku-revision`
+8. **Package:** `python -m labelos package examples/label.json releases/sku-revision`
+9. **Verify the package:** `python -m labelos verify-package releases/sku-revision`
 10. **Release** only the verified package directory. Keep the artwork, `validation-report.json`,
     `label-spec.json`, and `manifest.json` together. Do not edit files after packaging.
 
@@ -39,16 +39,16 @@ expected. Do not treat it as a pass.
 The bundled example is a 100 × 50 mm trim label with 3 mm bleed (artwork 106 × 56 mm):
 
 ```bash
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python -m labelos validate examples/label.json --json
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release
 ```
 
 A known failing spec is [`examples/failing-label.json`](examples/failing-label.json)
 (`REQUIRED_COPY_MISSING`). Use it to see how errors look:
 
 ```bash
-labelos validate examples/failing-label.json --json
+python -m labelos validate examples/failing-label.json --json
 ```
 
 ### Label spec fields
@@ -76,10 +76,10 @@ codes must decode to an expected string.
 
 | Command | Purpose |
 | --- | --- |
-| `labelos validate CONFIG [--json]` | Validate artwork and print a report |
-| `labelos package CONFIG DESTINATION [--json]` | Validate, then write a release package |
-| `labelos verify-package DESTINATION [--json]` | Check package checksums, paths, and passing status |
-| `labelos doctor [--json]` | Report required and optional tools |
+| `python -m labelos validate CONFIG [--json]` | Validate artwork and print a report |
+| `python -m labelos package CONFIG DESTINATION [--json]` | Validate, then write a release package |
+| `python -m labelos verify-package DESTINATION [--json]` | Check package checksums, paths, and passing status |
+| `python -m labelos doctor [--json]` | Report required and optional tools |
 
 `package` refuses to write over an existing destination and refuses failed reports.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
@@ -97,7 +97,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `SVG_DIMENSIONS_MISSING` | SVG width/height must use mm, cm, in, or pt |
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
-| `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Embedded SVG raster is below `min_dpi` |
+| `SVG_RASTER_INSPECTION_FAILED` | An SVG raster link is unreadable, unsafe, or cannot be inspected |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
@@ -109,6 +110,12 @@ byte-count mismatches, and reports that do not record a pass.
 See [PROJECT_STATUS.md](PROJECT_STATUS.md) for **AVAILABLE NOW**, **PARTIAL**,
 **EXTERNAL DEPENDENCY**, and **FUTURE**. Commercial Callas/pdfToolbox preflight is
 **not available**.
+
+SVG `<image>` rasters may be embedded with a data URI or linked through a safe relative
+local path (for example, `assets/logo.png`). Linked rasters are DPI-checked, recorded
+with checksums during validation, copied into the release package at the same relative
+path, and rejected if their bytes change before packaging. URLs, absolute paths,
+parent-directory traversal, symlinks, and fragment/query references are not accepted.
 
 ## Documentation
 
