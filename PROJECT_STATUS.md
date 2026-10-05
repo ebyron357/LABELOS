@@ -89,6 +89,24 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
+Verified on 2026-10-05 from the production-readiness branch:
+
+```text
+python3 -m pytest -q                                      # 60 passed; 1 upstream FastAPI/Starlette deprecation warning
+python3 -m ruff check .                                   # passed
+python3 -m compileall -q labelos illustrator_bridge tests # passed
+python3 -m pip check                                      # passed
+python3 -m build                                          # sdist and wheel built without setuptools package-discovery warning
+python3 -m labelos doctor --json                          # passed; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json    # PASS
+python3 -m labelos validate examples/failing-label.json --json # expected failure
+python3 -m labelos package examples/label.json /tmp/labelos-release-check --json # PASS
+python3 -m labelos verify-package /tmp/labelos-release-check --json # PASS
+```
+
+The distributable wheel includes the Illustrator bridge script. The only test warning is
+an upstream FastAPI/Starlette deprecation notice. Callas remains unavailable by design.
+
 Verified on 2026-09-23 from the current production-readiness branch:
 
 ```text
