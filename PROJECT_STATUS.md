@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked (non-embedded) SVG raster files | **AVAILABLE NOW** (safe local relative rasters are decoded, DPI-checked, copied into packages, and checksummed; remote, traversal, and symbolic-link targets are rejected) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -106,3 +106,24 @@ labelos verify-package storage/demo-release          # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
+
+## Latest verification
+
+Verified on 2026-10-05 from commit `81a1b85`:
+
+```text
+python3 -m pytest -q                                      # 61 passed
+python3 -m ruff check .                                    # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                                       # passed
+python3 -m build --outdir /tmp/labelos-build               # sdist + wheel passed
+python3 -m labelos doctor --json                           # required tools available
+python3 -m labelos validate examples/label.json --json     # PASS
+python3 -m labelos validate examples/failing-label.json    # exits 1 as expected
+python3 -m labelos package examples/label.json /tmp/labelos-e2e/release --json
+python3 -m labelos verify-package /tmp/labelos-e2e/release --json  # PASS
+```
+
+The release build includes the Illustrator bridge script without setuptools package-discovery
+warnings. Callas pdfToolbox is an optional external dependency and remains
+`SKIPPED_NOT_CONFIGURED`; commercial preflight was not run or claimed as a pass.

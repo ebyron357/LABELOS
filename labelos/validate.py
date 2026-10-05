@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 import struct
 import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
@@ -140,7 +141,7 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
         report.add("SVG_DIMENSIONS_MISSING", "error", "SVG width and height must use physical units")
     else:
         _validate_physical_size(spec, width, height, report)
-        _validate_svg_embedded_rasters(spec, report, root, width, height)
+        _validate_svg_rasters(spec, report, root, width, height)
     return text
 
 
@@ -166,6 +167,61 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         return unquote_to_bytes(payload)
     except (ValueError, base64.binascii.Error) as error:
         raise ValueError(f"invalid data URI: {error}") from error
+
+
+def svg_linked_raster_paths(artwork: Path) -> list[Path]:
+    """Return safe local raster references from an SVG.
+
+    A release package must contain every linked input it validated. URLs, fragments,
+    path traversal, and symbolic links make that package non-reproducible, so they
+    are rejected rather than ignored.
+    """
+
+    text = artwork.read_text(encoding="utf-8", errors="replace")
+    if _SVG_DOCTYPE_RE.search(text):
+        raise ValueError("SVG contains a DOCTYPE or entity declaration")
+    try:
+        root = ElementTree.fromstring(text)
+    except ElementTree.ParseError as error:
+        raise ValueError(f"SVG is not valid XML: {error}") from error
+
+    paths: list[Path] = []
+    for index, image in enumerate(
+        (element for element in root.iter() if _local_name(element.tag) == "image"), start=1
+    ):
+        href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
+        if href is None or href.startswith("data:image/"):
+            continue
+        path = _svg_linked_raster_path(artwork, href, index)
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _svg_linked_raster_path(artwork: Path, href: str, index: int) -> Path:
+    parsed = urlsplit(href)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment or "\\" in href:
+        raise ValueError(f"Linked image {index} must use a plain local relative path")
+    try:
+        relative = Path(unquote_to_bytes(parsed.path).decode("utf-8"))
+    except UnicodeDecodeError as error:
+        raise ValueError(f"Linked image {index} path must be UTF-8") from error
+    if (
+        not parsed.path
+        or relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise ValueError(f"Linked image {index} must use a plain local relative path")
+
+    base = artwork.parent.resolve()
+    candidate = base
+    for part in relative.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise ValueError(f"Linked image {index} must not use a symbolic link")
+    if not candidate.is_file():
+        raise ValueError(f"Linked image {index} does not exist or is not a regular file")
+    return candidate
 
 
 def _svg_image_display_mm(
@@ -222,14 +278,15 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _validate_svg_embedded_rasters(
+def _validate_svg_rasters(
     spec: LabelSpec, report: Report, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> None:
     images = [element for element in root.iter() if _local_name(element.tag) == "image"]
     if not images:
         return
-    report.checks.append("svg-embedded-raster-resolution")
-    inspected_images = []
+    report.checks.append("svg-raster-resolution")
+    embedded_images = []
+    linked_images = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
@@ -237,40 +294,57 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
-            if data is None:
-                continue
             from PIL import Image
 
-            with Image.open(BytesIO(data)) as raster:
+            if data is None:
+                linked_path = _svg_linked_raster_path(spec.artwork, href, index)
+                raster_source = linked_path
+            else:
+                raster_source = BytesIO(data)
+            with Image.open(raster_source) as raster:
+                raster.load()
                 pixels = raster.size
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
                 pixels[0] / (display_width / 25.4),
                 pixels[1] / (display_height / 25.4),
             )
-            inspected_images.append(
-                {
-                    "index": index,
-                    "pixels": {"width": pixels[0], "height": pixels[1]},
-                    "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
-                    "dpi": round(effective_dpi, 2),
-                }
-            )
+            details = {
+                "index": index,
+                "pixels": {"width": pixels[0], "height": pixels[1]},
+                "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
+                "dpi": round(effective_dpi, 2),
+            }
+            if data is None:
+                details.update(
+                    {
+                        "file": str(linked_path.relative_to(spec.artwork.parent.resolve())),
+                        "sha256": hashlib.sha256(linked_path.read_bytes()).hexdigest(),
+                    }
+                )
+                linked_images.append(details)
+            else:
+                embedded_images.append(details)
             if effective_dpi < spec.min_dpi:
                 report.add(
-                    "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
+                    "SVG_LINKED_IMAGE_DPI_TOO_LOW" if data is None else "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
                     "error",
-                    f"Embedded image {index} has effective resolution {effective_dpi:.1f} DPI; "
+                    f"{'Linked' if data is None else 'Embedded'} image {index} has "
+                    f"effective resolution {effective_dpi:.1f} DPI; "
                     f"minimum is {spec.min_dpi} DPI",
                 )
         except (ImportError, OSError, ValueError) as error:
             report.add(
-                "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
+                "SVG_LINKED_IMAGE_INSPECTION_FAILED"
+                if not href.startswith("data:image/")
+                else "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
                 "error",
-                f"Could not inspect embedded image {index}: {error}",
+                f"Could not inspect image {index}: {error}",
             )
-    if inspected_images:
-        report.metadata["svg_embedded_images"] = inspected_images
+    if embedded_images:
+        report.metadata["svg_embedded_images"] = embedded_images
+    if linked_images:
+        report.metadata["svg_linked_images"] = linked_images
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:
