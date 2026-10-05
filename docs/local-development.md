@@ -8,15 +8,15 @@
 
 ```bash
 python -m pip install -e ".[test,dev]"
-labelos doctor --json
+python -m labelos doctor --json
 ```
 
 ## Operator CLI
 
 ```bash
-labelos validate examples/label.json --json
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release
+python -m labelos validate examples/label.json --json
+python -m labelos package examples/label.json storage/demo-release
+python -m labelos verify-package storage/demo-release
 ```
 
 ## Tests
