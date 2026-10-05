@@ -108,6 +108,7 @@ This run completed the actionable linked-SVG-raster gap: safe local linked files
 validated, carried in release packages, and protected by manifest checksums. No further
 software work is currently actionable without printer-approved color/prepress requirements
 or a licensed Callas/Illustrator environment.
+Latest verified implementation commit: `152d2b1`.
 
 Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
 
