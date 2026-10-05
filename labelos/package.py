@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -54,6 +55,7 @@ def create_package(
         "artwork": _manifest_entry(artwork_destination),
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
+        "linked_assets": linked_assets,
         "extras": extra_manifest,
         "spec": spec_payload,
     }
@@ -85,6 +87,13 @@ def verify_package(destination: Path) -> list[str]:
         if path is not None:
             entries[key] = path
 
+    linked_assets = manifest.get("linked_assets") or {}
+    if linked_assets and not isinstance(linked_assets, dict):
+        failures.append("linked_assets manifest entry must be an object")
+    else:
+        for name, entry in linked_assets.items():
+            _validate_entry(destination, f"linked asset:{name}", entry, failures)
+
     extras = manifest.get("extras") or {}
     if extras and not isinstance(extras, dict):
         failures.append("extras manifest entry must be an object")
@@ -109,13 +118,58 @@ def _manifest_entry(path: Path) -> dict[str, str | int]:
     return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
 
 
+def _copy_linked_assets(spec: LabelSpec, report: Report, destination: Path) -> dict[str, Any]:
+    """Copy validation-recorded local SVG assets while keeping their relative hrefs valid."""
+
+    assets = report.metadata.get("svg_linked_assets", [])
+    if not isinstance(assets, list):
+        raise TypeError("Validation report linked asset metadata is invalid")
+    manifest: dict[str, Any] = {}
+    source_root = spec.artwork.parent.resolve()
+    for asset in assets:
+        if not isinstance(asset, dict):
+            raise TypeError("Validation report linked asset metadata is invalid")
+        href = asset.get("href")
+        digest = asset.get("sha256")
+        byte_count = asset.get("bytes")
+        if not isinstance(href, str) or not _is_package_filename(href):
+            raise ValueError(f"Unsafe linked SVG asset filename: {href!r}")
+        if Path(href).parts[0] in _RESERVED_FILENAMES:
+            raise ValueError(f"Unsafe linked SVG asset filename: {href!r}")
+        if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+            raise ValueError(f"Linked SVG asset validation metadata is invalid: {href}")
+        if not isinstance(byte_count, int) or isinstance(byte_count, bool):
+            raise TypeError(f"Linked SVG asset validation metadata is invalid: {href}")
+        source = source_root / href
+        if not _is_regular_file(source):
+            raise ValueError(f"Linked SVG asset changed after validation: {href}")
+        if source.stat().st_size != byte_count or sha256_file(source) != digest:
+            raise ValueError(f"Linked SVG asset changed after validation: {href}")
+        target = destination / href
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        manifest[href] = _manifest_entry_relative(target, destination)
+    return manifest
+
+
+def _manifest_entry_relative(path: Path, root: Path) -> dict[str, str | int]:
+    entry = _manifest_entry(path)
+    entry["file"] = path.relative_to(root).as_posix()
+    return entry
+
+
 def _is_regular_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
 
 
 def _is_package_filename(value: str) -> bool:
     path = Path(value)
-    return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
+    return (
+        value not in {"", ".", ".."}
+        and not path.is_absolute()
+        and "\\" not in value
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
 
 
 def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:

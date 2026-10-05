@@ -85,6 +85,12 @@ codes must decode to an expected string.
 `verify-package` rejects path traversal, non-regular files, checksum mismatches,
 byte-count mismatches, and reports that do not record a pass.
 
+SVG labels may reference raster images through safe relative `href` paths (for example,
+`assets/product.png`). LABELOS validates each linked raster's effective DPI, records its
+checksum in the report, preserves the relative path in the release package, and rejects
+packaging if the asset changes after validation. Remote URLs, absolute paths, traversal,
+and symlinks are rejected.
+
 ## Error codes
 
 | Code | Meaning |
@@ -98,6 +104,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | A relative SVG-linked raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_INSPECTION_FAILED` | An SVG raster link is missing, unsafe, or unreadable |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
