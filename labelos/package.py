@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_assets(spec, report, destination, artwork_destination.name)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -52,6 +53,7 @@ def create_package(
         "schema_version": _PACKAGE_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "artwork": _manifest_entry(artwork_destination),
+        "linked_assets": linked_assets,
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
         "extras": extra_manifest,
@@ -84,6 +86,16 @@ def verify_package(destination: Path) -> list[str]:
         path = _validate_entry(destination, key, manifest.get(key), failures)
         if path is not None:
             entries[key] = path
+
+    linked_assets = manifest.get("linked_assets") or {}
+    if linked_assets and not isinstance(linked_assets, dict):
+        failures.append("linked_assets manifest entry must be an object")
+    else:
+        for source, entry in linked_assets.items():
+            if not isinstance(source, str) or not _is_linked_asset_path(source):
+                failures.append(f"linked asset file path is invalid: {source!r}")
+                continue
+            _validate_entry(destination, f"linked_asset:{source}", entry, failures, allow_nested=True)
 
     extras = manifest.get("extras") or {}
     if extras and not isinstance(extras, dict):
@@ -118,13 +130,30 @@ def _is_package_filename(value: str) -> bool:
     return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
 
 
-def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
+def _is_linked_asset_path(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and value not in {".", ".."}
+        and ".." not in path.parts
+        and path.name not in _RESERVED_FILENAMES
+    )
+
+
+def _validate_entry(
+    destination: Path, key: str, entry: Any, failures: list[str], allow_nested: bool = False
+) -> Path | None:
     if not isinstance(entry, dict):
         failures.append(f"{key} manifest entry is missing or invalid")
         return None
 
     filename = entry.get("file")
-    if not isinstance(filename, str) or not _is_package_filename(filename):
+    if not isinstance(filename, str):
+        failures.append(f"{key} file must be a package-relative filename")
+        return None
+    valid_filename = _is_linked_asset_path(filename) if allow_nested else _is_package_filename(filename)
+    if not valid_filename:
         failures.append(f"{key} file must be a package-relative filename")
         return None
 
@@ -146,6 +175,46 @@ def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]
         failures.append(f"{key} byte count mismatch: {filename}")
 
     return path
+
+
+def _copy_linked_assets(
+    spec: LabelSpec, report: Report, destination: Path, artwork_filename: str
+) -> dict[str, dict[str, str | int]]:
+    """Copy validation-bound local SVG raster assets without changing their href paths."""
+
+    assets = report.metadata.get("svg_linked_images", [])
+    if not isinstance(assets, list):
+        raise TypeError("Validation report linked raster metadata must be a list")
+    manifest: dict[str, dict[str, str | int]] = {}
+    for asset in assets:
+        if not isinstance(asset, dict):
+            raise TypeError("Validation report linked raster metadata entries must be objects")
+        source = asset.get("source")
+        expected_digest = asset.get("sha256")
+        if (
+            not isinstance(source, str)
+            or not _is_linked_asset_path(source)
+            or source == artwork_filename
+            or not isinstance(expected_digest, str)
+            or _SHA256_RE.fullmatch(expected_digest) is None
+        ):
+            raise ValueError("Validation report linked raster metadata is invalid")
+        source_path = (spec.artwork.parent / source).resolve()
+        try:
+            source_path.relative_to(spec.artwork.parent.resolve())
+        except ValueError as error:
+            raise ValueError(f"Linked raster asset escapes artwork directory: {source}") from error
+        if source_path.is_symlink() or not source_path.is_file():
+            raise ValueError(f"Linked raster asset is missing or is not a regular file: {source}")
+        if sha256_file(source_path) != expected_digest:
+            raise ValueError(f"Linked raster asset changed after validation: {source}")
+        target = destination / source
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, target)
+        entry = _manifest_entry(target)
+        entry["file"] = source
+        manifest[source] = entry
+    return manifest
 
 
 def _validate_report_and_spec(
