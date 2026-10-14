@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -369,6 +371,18 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_cli_doctor_runs():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +479,114 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_dpi_checked_packaged_and_verified(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    linked_image = assets / "product.png"
+    Image.new("RGB", (600, 600), "black").save(linked_image)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/product.png" width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    linked = report.metadata["svg_linked_images"][0]
+    assert linked["href"] == "assets/product.png"
+    assert linked["dpi"] >= 300
+    manifest = create_package(spec, report, tmp_path / "release")
+    assert (manifest.parent / "assets" / "product.png").read_bytes() == linked_image.read_bytes()
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["dependencies"]["assets/product.png"]["sha256"] == linked["sha256"]
+    assert not verify_package(manifest.parent)
+
+    (manifest.parent / "assets" / "product.png").write_bytes(b"tampered")
+
+    assert verify_package(manifest.parent) == [
+        "dependencies:assets/product.png checksum mismatch: assets/product.png",
+        "dependencies:assets/product.png byte count mismatch: assets/product.png",
+    ]
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["../product.png", "https://example.test/product.png", "assets%2Fproduct.png", "assets\\product.png", "product.png?version=1", "#product"],
+)
+def test_svg_rejects_unsafe_linked_raster_paths(tmp_path, href):
+    artwork = tmp_path / "unsafe-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            f'viewBox="0 0 100 100"><image href="{href}" width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_UNSAFE" for issue in report.issues)
+
+
+def test_low_resolution_linked_svg_raster_fails(tmp_path):
+    image = tmp_path / "product.png"
+    Image.new("RGB", (100, 100), "black").save(image)
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="product.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_svg_rejects_linked_raster_through_symlinked_directory(tmp_path):
+    real_assets = tmp_path / "real-assets"
+    real_assets.mkdir()
+    Image.new("RGB", (600, 600), "black").save(real_assets / "product.png")
+    symlink_assets = tmp_path / "assets"
+    try:
+        symlink_assets.symlink_to(real_assets, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+    artwork = tmp_path / "linked-image.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/product.png" width="20" height="20"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_UNSAFE" for issue in report.issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
