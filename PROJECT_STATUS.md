@@ -91,6 +91,8 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 Most recently verified on 2026-10-14:
 
+Validated implementation commit: `7feef3b`.
+
 ```text
 python3 -m pytest -q                     # 66 passed (one upstream FastAPI/Starlette deprecation warning)
 python3 -m ruff check .                  # passed
