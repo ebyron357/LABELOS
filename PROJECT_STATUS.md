@@ -1,6 +1,7 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: `main` at `19167e0` (the merged
+`stabilize/canonical-validator` release engine).
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -61,6 +62,10 @@ labelos verify-package storage/demo-release
    be reported as safe-area violations; keep live matter inside the inset.
 4. **No approved printer profile is loaded.** Do not invent printer-specific limits.
 5. **Live Illustrator generation is blocked** without a licensed workstation and template.
+6. **Linked SVG raster support is pending integration.** The current released engine
+   deliberately reports non-embedded raster files as partial coverage. Green PR
+   [#217](https://github.com/ebyron357/LABELOS/pull/217) implements safe local-path
+   validation and packaging; do not duplicate that work while it awaits review/merge.
 
 ## Future roadmap (documented, not built in this pass)
 
@@ -88,6 +93,26 @@ Keep `main` (#6 and earlier) as history. `feat/production-label-automation` rema
 optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
+
+Verified on 2026-10-14 from `main` at `19167e0`:
+
+```text
+python3 -m pytest -q                                      # 56 passed; 1 upstream FastAPI/Starlette deprecation warning
+python3 -m ruff check .                                   # passed
+python3 -m compileall -q labelos illustrator_bridge tests # passed
+python3 -m pip check                                      # passed
+~/.local/bin/labelos doctor --json                        # passed; Callas SKIPPED_NOT_CONFIGURED
+~/.local/bin/labelos validate examples/label.json --json  # PASS
+~/.local/bin/labelos validate examples/failing-label.json --json # expected REQUIRED_COPY_MISSING failure
+~/.local/bin/labelos package examples/label.json /tmp/labelos-verification-current --json # PASS
+~/.local/bin/labelos verify-package /tmp/labelos-verification-current --json # PASS
+python3 -m build                                          # sdist and wheel built
+```
+
+The production operator path is healthy. The one remaining software capability
+gap is linked non-embedded SVG rasters, already implemented and CI-green in
+[#217](https://github.com/ebyron357/LABELOS/pull/217); it requires integration,
+not another duplicate implementation.
 
 Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
 
