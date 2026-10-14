@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: `main` plus the current production-readiness change set.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -109,10 +109,10 @@ safe (no encoded, traversal, remote, fragment, or backslash paths). They are DPI
 checked, checksum-bound before packaging, included at their original relative
 paths, and integrity-verified in the package manifest.
 
-Verified on 2026-10-05 from the production-readiness branch:
+Verified on 2026-10-14 from the production-readiness branch:
 
 ```text
-python3 -m pytest -q                         # 61 passed; 1 upstream FastAPI/Starlette deprecation warning
+python3 -m pytest -q                         # 65 passed; 1 upstream FastAPI/Starlette deprecation warning
 python3 -m ruff check .                      # passed
 python3 -m compileall -q labelos illustrator_bridge tests # passed
 python3 -m pip check                         # passed
@@ -124,10 +124,11 @@ python3 -m labelos package examples/label.json /tmp/labelos-release-final --json
 python3 -m labelos verify-package /tmp/labelos-release-final --json # PASS
 ```
 
-This run completed the linked-SVG-raster gap: safe local linked files are validated,
-carried in release packages, and protected by manifest checksums. The remaining
-blockers require printer-approved color/prepress requirements or licensed Callas /
-Illustrator environments; no P0/P1 software defect is known.
+This run closed the linked-SVG-raster gap: safe local linked files are validated,
+carried in release packages, and protected by manifest checksums. Unsafe remote,
+fragment, traversal, percent-encoded, backslash, and symbolic-link paths fail
+closed. The remaining blockers require printer-approved color/prepress requirements
+or licensed Callas / Illustrator environments; no P0/P1 software defect is known.
 
 Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
 
