@@ -9,7 +9,7 @@ import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote, unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
@@ -168,6 +168,42 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def svg_linked_assets(artwork: Path) -> list[tuple[str, Path, Path]]:
+    """Return local SVG image dependencies as (href, source, package-relative path).
+
+    SVG image links are part of the artwork, so a release must validate and package
+    them. Only regular files below the SVG's directory are accepted: remote, absolute,
+    traversal, and symlinked sources make a release non-reproducible or unsafe.
+    """
+
+    root_directory = artwork.parent.resolve()
+    try:
+        root = ElementTree.fromstring(artwork.read_text(encoding="utf-8", errors="replace"))
+    except ElementTree.ParseError as error:
+        raise ValueError(f"SVG is not valid XML: {error}") from error
+    assets: list[tuple[str, Path, Path]] = []
+    for image in (element for element in root.iter() if _local_name(element.tag) == "image"):
+        href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
+        if href is None or href.startswith("data:"):
+            continue
+        parts = urlsplit(href)
+        if parts.scheme or parts.netloc or parts.query or parts.fragment:
+            raise ValueError(f"image href must be a plain relative file path: {href!r}")
+        decoded = unquote(parts.path)
+        candidate = Path(decoded)
+        if not decoded or "\x00" in decoded or candidate.is_absolute():
+            raise ValueError(f"image href must be a safe relative file path: {href!r}")
+        source = (root_directory / candidate).resolve()
+        try:
+            relative = source.relative_to(root_directory)
+        except ValueError as error:
+            raise ValueError(f"image href escapes the artwork directory: {href!r}") from error
+        if not source.is_file() or source.is_symlink():
+            raise ValueError(f"image href is missing or is not a regular file: {href!r}")
+        assets.append((href, source, relative))
+    return assets
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -230,6 +266,11 @@ def _validate_svg_embedded_rasters(
         return
     report.checks.append("svg-embedded-raster-resolution")
     inspected_images = []
+    linked_assets: dict[str, tuple[Path, Path]] = {}
+    try:
+        linked_assets = {href: (source, relative) for href, source, relative in svg_linked_assets(spec.artwork)}
+    except ValueError as error:
+        report.add("SVG_LINKED_IMAGE_UNSAFE_PATH", "error", str(error))
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
@@ -237,11 +278,17 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
+            source = "embedded"
             if data is None:
-                continue
+                linked_asset = linked_assets.get(href)
+                if linked_asset is None:
+                    continue
+                data = linked_asset[0].read_bytes()
+                source = "linked"
             from PIL import Image
 
             with Image.open(BytesIO(data)) as raster:
+                raster.load()
                 pixels = raster.size
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
@@ -254,6 +301,8 @@ def _validate_svg_embedded_rasters(
                     "pixels": {"width": pixels[0], "height": pixels[1]},
                     "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
                     "dpi": round(effective_dpi, 2),
+                    "source": source,
+                    **({"file": str(linked_assets[href][1])} if source == "linked" else {}),
                 }
             )
             if effective_dpi < spec.min_dpi:
