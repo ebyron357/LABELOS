@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_validated_linked_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -52,6 +53,7 @@ def create_package(
         "schema_version": _PACKAGE_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "artwork": _manifest_entry(artwork_destination),
+        "linked_assets": linked_assets,
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
         "extras": extra_manifest,
@@ -84,6 +86,14 @@ def verify_package(destination: Path) -> list[str]:
         path = _validate_entry(destination, key, manifest.get(key), failures)
         if path is not None:
             entries[key] = path
+    linked_assets = manifest.get("linked_assets") or {}
+    if linked_assets and not isinstance(linked_assets, dict):
+        failures.append("linked_assets manifest entry must be an object")
+    else:
+        for name, entry in linked_assets.items():
+            linked_path = _validate_entry(destination, f"linked asset:{name}", entry, failures)
+            if linked_path is not None and entry.get("file") != name:
+                failures.append(f"linked asset manifest file does not match href: {name}")
 
     extras = manifest.get("extras") or {}
     if extras and not isinstance(extras, dict):
@@ -109,13 +119,57 @@ def _manifest_entry(path: Path) -> dict[str, str | int]:
     return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
 
 
+def _copy_validated_linked_assets(
+    spec: LabelSpec, report: Report, destination: Path
+) -> dict[str, dict[str, str | int]]:
+    """Copy linked SVG rasters only when they still match the validation report."""
+
+    linked_assets = report.metadata.get("svg_linked_images", [])
+    if not isinstance(linked_assets, list):
+        raise TypeError("Validation report has invalid linked SVG image metadata")
+    copied: dict[str, dict[str, str | int]] = {}
+    for asset in linked_assets:
+        if not isinstance(asset, dict):
+            raise TypeError("Validation report has invalid linked SVG image metadata")
+        href, expected_digest, expected_bytes = (
+            asset.get("href"),
+            asset.get("sha256"),
+            asset.get("bytes"),
+        )
+        if not isinstance(href, str) or not _is_package_filename(href):
+            raise ValueError(f"Unsafe linked SVG image path: {href!r}")
+        source = (spec.artwork.parent / href).resolve()
+        try:
+            source.relative_to(spec.artwork.parent.resolve())
+        except ValueError as error:
+            raise ValueError(f"Unsafe linked SVG image path: {href!r}") from error
+        if not _is_regular_file(source):
+            raise ValueError(f"Linked SVG image is missing or is not a regular file: {href}")
+        if (
+            not isinstance(expected_digest, str)
+            or sha256_file(source) != expected_digest
+            or not isinstance(expected_bytes, int)
+            or source.stat().st_size != expected_bytes
+        ):
+            raise ValueError(f"Linked SVG image changed after validation: {href}")
+        target = destination / href
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        copied[href] = _manifest_entry(target) | {"file": href}
+    return copied
+
+
 def _is_regular_file(path: Path) -> bool:
-    return path.is_file() and not path.is_symlink()
+    return path.is_file() and not any(parent.is_symlink() for parent in (path, *path.parents))
 
 
 def _is_package_filename(value: str) -> bool:
     path = Path(value)
-    return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
 
 
 def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
