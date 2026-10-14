@@ -138,6 +138,8 @@ def _is_linked_asset_path(value: str) -> bool:
     return (
         bool(value)
         and not path.is_absolute()
+        and "%" not in value
+        and "\\" not in value
         and value not in {".", ".."}
         and ".." not in path.parts
         and path.name not in _RESERVED_FILENAMES

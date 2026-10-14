@@ -539,12 +539,22 @@ def test_linked_svg_raster_change_after_validation_blocks_package(tmp_path):
         create_package(spec, report, tmp_path / "release")
 
 
-def test_unsafe_linked_svg_raster_fails_closed(tmp_path):
+@pytest.mark.parametrize(
+    "href",
+    [
+        "https://example.test/product.png",
+        "../product.png",
+        "assets%2Fproduct.png",
+        r"assets\product.png",
+        "product.png#fragment",
+    ],
+)
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path, href):
     artwork = tmp_path / "label.svg"
     artwork.write_text(
         (
             '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
-            '<image href="https://example.test/product.png" width="20mm" height="20mm"/></svg>'
+            f'<image href="{href}" width="20mm" height="20mm"/></svg>'
         ),
         encoding="utf-8",
     )
