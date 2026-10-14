@@ -558,6 +558,25 @@ def test_unsafe_linked_svg_raster_fails_closed(tmp_path):
     assert [issue.code for issue in report.issues] == ["SVG_LINKED_IMAGE_INSPECTION_FAILED"]
 
 
+def test_percent_encoded_linked_svg_raster_fails_closed(tmp_path):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+            '<image href="%2e%2e/outside.png" width="20mm" height="20mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert [issue.code for issue in report.issues] == ["SVG_LINKED_IMAGE_INSPECTION_FAILED"]
+
+
 def test_verify_package_rejects_linked_asset_entry_substitution(tmp_path):
     assets = tmp_path / "assets"
     assets.mkdir()

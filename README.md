@@ -82,7 +82,7 @@ codes must decode to an expected string.
 | `labelos doctor [--json]` | Report required and optional tools |
 
 `package` refuses to write over an existing destination and refuses failed reports.
-For SVG artwork, linked raster files must be safe relative local paths; they are
+For SVG artwork, linked raster files must be safe, unencoded relative local paths; they are
 resolution-checked, copied into the release package at the same relative paths, and
 checksum-verified. `verify-package` rejects path traversal, non-regular files,
 checksum mismatches, byte-count mismatches, and reports that do not record a pass.
