@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    dependencies = _copy_svg_linked_images(spec, report, destination, artwork_destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -55,6 +56,7 @@ def create_package(
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
         "extras": extra_manifest,
+        "dependencies": dependencies,
         "spec": spec_payload,
     }
     manifest_path = destination / "manifest.json"
@@ -85,14 +87,10 @@ def verify_package(destination: Path) -> list[str]:
         if path is not None:
             entries[key] = path
 
-    extras = manifest.get("extras") or {}
-    if extras and not isinstance(extras, dict):
-        failures.append("extras manifest entry must be an object")
-    else:
-        for name, entry in extras.items():
-            extra_path = _validate_entry(destination, f"extra:{name}", entry, failures)
-            if extra_path is not None and not _is_package_filename(str(entry.get("file", name))):
-                failures.append(f"extra file path is invalid: {name}")
+    _validate_manifest_files(destination, "extras", manifest.get("extras"), failures, nested=False)
+    _validate_manifest_files(
+        destination, "dependencies", manifest.get("dependencies"), failures, nested=True
+    )
 
     _validate_report_and_spec(manifest, entries, failures)
     return failures
@@ -109,6 +107,37 @@ def _manifest_entry(path: Path) -> dict[str, str | int]:
     return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
 
 
+def _copy_svg_linked_images(
+    spec: LabelSpec, report: Report, destination: Path, artwork_destination: Path
+) -> dict[str, dict[str, str | int]]:
+    dependencies: dict[str, dict[str, str | int]] = {}
+    for image in report.metadata.get("svg_linked_images", []):
+        if not isinstance(image, dict):
+            raise TypeError("Validated SVG linked-image metadata is invalid")
+        href = image.get("href")
+        digest = image.get("sha256")
+        if not isinstance(href, str) or not _is_package_relative_path(href):
+            raise ValueError(f"Unsafe SVG linked-image path: {href!r}")
+        source = spec.artwork.parent / href
+        if (
+            _path_has_symlink(spec.artwork.parent, Path(href))
+            or not source.is_file()
+            or sha256_file(source) != digest
+        ):
+            raise ValueError(f"SVG linked image changed after validation: {href}")
+        target = destination / href
+        if target == artwork_destination or target.exists():
+            raise ValueError(f"SVG linked image conflicts with package content: {href}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        dependencies[href] = {
+            "file": href,
+            "sha256": sha256_file(target),
+            "bytes": target.stat().st_size,
+        }
+    return dependencies
+
+
 def _is_regular_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
 
@@ -118,13 +147,53 @@ def _is_package_filename(value: str) -> bool:
     return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
 
 
-def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
+def _is_package_relative_path(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and "\\" not in value
+        and ".." not in path.parts
+        and path.name not in {"", ".", ".."}
+        and not any(part in {"", "."} for part in path.parts)
+    )
+
+
+def _path_has_symlink(root: Path, relative: Path) -> bool:
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _validate_manifest_files(
+    destination: Path, group: str, entries: Any, failures: list[str], nested: bool
+) -> None:
+    entries = entries or {}
+    if not isinstance(entries, dict):
+        failures.append(f"{group} manifest entry must be an object")
+        return
+    for name, entry in entries.items():
+        path = _validate_entry(destination, f"{group}:{name}", entry, failures, nested=nested)
+        valid_name = _is_package_relative_path if nested else _is_package_filename
+        if path is not None and (
+            not isinstance(entry, dict) or not valid_name(str(entry.get("file", name)))
+        ):
+            failures.append(f"{group} file path is invalid: {name}")
+
+
+def _validate_entry(
+    destination: Path, key: str, entry: Any, failures: list[str], nested: bool = False
+) -> Path | None:
     if not isinstance(entry, dict):
         failures.append(f"{key} manifest entry is missing or invalid")
         return None
 
     filename = entry.get("file")
-    if not isinstance(filename, str) or not _is_package_filename(filename):
+    valid_filename = _is_package_relative_path if nested else _is_package_filename
+    if not isinstance(filename, str) or not valid_filename(filename):
         failures.append(f"{key} file must be a package-relative filename")
         return None
 

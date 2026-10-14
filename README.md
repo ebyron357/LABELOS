@@ -98,6 +98,8 @@ byte-count mismatches, and reports that do not record a pass.
 | `DIMENSIONS_MISMATCH` | Artwork size is not trim + bleed |
 | `DPI_TOO_LOW` | Raster file effective resolution is below `min_dpi` |
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_DPI_TOO_LOW` | Linked local SVG raster is below `min_dpi` |
+| `SVG_LINKED_IMAGE_UNSAFE` | Linked SVG raster uses an unsafe, missing, or symlinked path |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
 | `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
@@ -109,6 +111,11 @@ byte-count mismatches, and reports that do not record a pass.
 See [PROJECT_STATUS.md](PROJECT_STATUS.md) for **AVAILABLE NOW**, **PARTIAL**,
 **EXTERNAL DEPENDENCY**, and **FUTURE**. Commercial Callas/pdfToolbox preflight is
 **not available**.
+
+SVG raster links must be local, relative files below the artwork directory. They are
+DPI-checked, checksum-bound, and copied into the release package at the same relative
+path. Remote URLs, fragments, queries, encoded or backslash paths, traversal, and
+symlinks are rejected.
 
 ## Documentation
 

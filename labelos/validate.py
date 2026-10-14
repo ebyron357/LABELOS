@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 import struct
 import zlib
@@ -19,6 +20,7 @@ MM_PER_POINT = 25.4 / 72
 MM_PER_CSS_PIXEL = 25.4 / 96
 SAFE_AREA_RENDER_DPI = 300
 _SVG_DOCTYPE_RE = re.compile(r"<!DOCTYPE|<!ENTITY", re.IGNORECASE)
+_UNSAFE_LINKED_IMAGE_HREF = re.compile(r"[%\\?#]")
 
 
 def validate(spec: LabelSpec) -> Report:
@@ -228,8 +230,9 @@ def _validate_svg_embedded_rasters(
     images = [element for element in root.iter() if _local_name(element.tag) == "image"]
     if not images:
         return
-    report.checks.append("svg-embedded-raster-resolution")
+    report.checks.append("svg-raster-resolution")
     inspected_images = []
+    linked_images = []
     for index, image in enumerate(images, start=1):
         href = image.get("href") or image.get("{http://www.w3.org/1999/xlink}href")
         if href is None:
@@ -237,12 +240,15 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
+            linked_path = None
             if data is None:
-                continue
+                linked_path = _resolve_svg_linked_raster(spec.artwork, href)
+                data = linked_path.read_bytes()
             from PIL import Image
 
             with Image.open(BytesIO(data)) as raster:
                 pixels = raster.size
+                raster.load()
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
                 pixels[0] / (display_width / 25.4),
@@ -257,20 +263,79 @@ def _validate_svg_embedded_rasters(
                 }
             )
             if effective_dpi < spec.min_dpi:
+                image_kind = "Linked" if linked_path else "Embedded"
                 report.add(
-                    "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
+                    "SVG_LINKED_IMAGE_DPI_TOO_LOW" if linked_path else "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW",
                     "error",
-                    f"Embedded image {index} has effective resolution {effective_dpi:.1f} DPI; "
+                    f"{image_kind} image {index} has effective resolution {effective_dpi:.1f} DPI; "
                     f"minimum is {spec.min_dpi} DPI",
                 )
+            if linked_path:
+                linked_images.append(
+                    {
+                        "href": href,
+                        "sha256": hashlib.sha256(data).hexdigest(),
+                        "bytes": len(data),
+                        "pixels": {"width": pixels[0], "height": pixels[1]},
+                        "display_mm": {
+                            "width": round(display_width, 3),
+                            "height": round(display_height, 3),
+                        },
+                        "dpi": round(effective_dpi, 2),
+                    }
+                )
         except (ImportError, OSError, ValueError) as error:
+            code = (
+                "SVG_LINKED_IMAGE_UNSAFE"
+                if not href.startswith("data:") and str(error).startswith("unsafe linked SVG raster")
+                else "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED"
+            )
             report.add(
-                "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED",
+                code,
                 "error",
-                f"Could not inspect embedded image {index}: {error}",
+                f"Could not inspect SVG image {index}: {error}",
             )
     if inspected_images:
         report.metadata["svg_embedded_images"] = inspected_images
+    if linked_images:
+        report.metadata["svg_linked_images"] = linked_images
+
+
+def _resolve_svg_linked_raster(artwork: Path, href: str) -> Path:
+    """Resolve a local SVG image reference without allowing package escape hatches."""
+
+    if (
+        not href
+        or _UNSAFE_LINKED_IMAGE_HREF.search(href)
+        or href.startswith(("/", "data:"))
+        or "://" in href
+    ):
+        raise ValueError(f"unsafe linked SVG raster href: {href!r}")
+    relative = Path(href)
+    if relative.is_absolute() or ".." in relative.parts or relative.name != href.rsplit("/", 1)[-1]:
+        raise ValueError(f"unsafe linked SVG raster href: {href!r}")
+    candidate = artwork.parent / relative
+    try:
+        resolved_root = artwork.parent.resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=True)
+    except OSError as error:
+        raise ValueError(f"unsafe linked SVG raster href: {href!r} ({error})") from error
+    if (
+        _path_has_symlink(artwork.parent, relative)
+        or not candidate.is_file()
+        or resolved_root not in resolved_candidate.parents
+    ):
+        raise ValueError(f"unsafe linked SVG raster href: {href!r}")
+    return candidate
+
+
+def _path_has_symlink(root: Path, relative: Path) -> bool:
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def _pdf_open_errors() -> tuple[type[BaseException], ...]:
