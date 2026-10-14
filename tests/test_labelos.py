@@ -467,6 +467,54 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
 
 
+def _linked_raster_svg(tmp_path: Path, href: str = "assets/linked.png") -> LabelSpec:
+    asset = tmp_path / "assets" / "linked.png"
+    asset.parent.mkdir(exist_ok=True)
+    Image.new("RGB", (1200, 1200), "white").save(asset)
+    artwork = tmp_path / "linked-raster.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+            f'<image href="{href}" x="10mm" y="10mm" width="10mm" height="10mm"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    return LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 50, "bleed_mm": 3}, tmp_path
+    )
+
+
+def test_linked_svg_raster_is_checked_and_packaged(tmp_path):
+    spec = _linked_raster_svg(tmp_path)
+    report = validate(spec)
+
+    assert report.passed
+    assert report.metadata["svg_linked_images"][0]["href"] == "assets/linked.png"
+    manifest = create_package(spec, report, tmp_path / "release")
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["linked_assets"]["assets/linked.png"]["file"] == "assets/linked.png"
+    assert (manifest.parent / "assets" / "linked.png").is_file()
+    assert not verify_package(manifest.parent)
+
+
+def test_linked_svg_raster_changed_after_validation_cannot_package(tmp_path):
+    spec = _linked_raster_svg(tmp_path)
+    report = validate(spec)
+    (tmp_path / "assets" / "linked.png").write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="changed after validation"):
+        create_package(spec, report, tmp_path / "release")
+
+
+def test_linked_svg_raster_rejects_encoded_path(tmp_path):
+    spec = _linked_raster_svg(tmp_path, "assets%2flinked.png")
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_LINKED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
     value = "LABELOS-PDF-12345"
     barcode_path = Path(
