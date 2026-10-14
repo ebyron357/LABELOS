@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked local SVG raster files | **AVAILABLE NOW** (safe relative `href` files are DPI-checked, package-bound, and checksum-verified; remote or unsafe links are rejected) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -89,20 +89,30 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-10-14 from branch `cursor/label-production-system-readiness-98ea`:
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+Completed on 2026-10-14:
+
+```text
+Commit: c0ff8ff feat: validate and package linked SVG rasters
+Python: 3.12
+python3 -m pytest -q                                  # 66 passed, 1 upstream deprecation warning
+python3 -m ruff check .                               # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                                  # passed
+python3 -m build                                      # sdist + wheel passed (no package-discovery warning)
+python3 -m labelos doctor --json                      # Pillow/PyMuPDF/ZXing-C++ available
+python3 -m labelos validate examples/label.json --json # PASS
+python3 -m labelos validate examples/failing-label.json --json # expected REQUIRED_COPY_MISSING
+python3 -m labelos package examples/label.json /tmp/labelos-operator-release --json # PASS
+python3 -m labelos verify-package /tmp/labelos-operator-release --json # PASS
+```
+
+The generated artifacts were `dist/labelos-0.2.0.tar.gz`,
+`dist/labelos-0.2.0-py3-none-any.whl`, and the verified
+`/tmp/labelos-operator-release` package. Callas pdfToolbox was correctly reported
+as `SKIPPED_NOT_CONFIGURED`; it was not represented as a passing commercial preflight.
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
