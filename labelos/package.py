@@ -7,7 +7,7 @@ import json
 import re
 import shutil
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .models import LabelSpec, Report
@@ -32,6 +32,7 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_linked_svg_assets(spec, report, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -54,6 +55,7 @@ def create_package(
         "artwork": _manifest_entry(artwork_destination),
         "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
         "label_spec": _manifest_entry(spec_path),
+        "linked_assets": linked_assets,
         "extras": extra_manifest,
         "spec": spec_payload,
     }
@@ -84,6 +86,12 @@ def verify_package(destination: Path) -> list[str]:
         path = _validate_entry(destination, key, manifest.get(key), failures)
         if path is not None:
             entries[key] = path
+    linked_assets = manifest.get("linked_assets") or []
+    if not isinstance(linked_assets, list):
+        failures.append("linked_assets manifest entry must be a list")
+    else:
+        for index, entry in enumerate(linked_assets, start=1):
+            _validate_entry(destination, f"linked asset {index}", entry, failures, nested=True)
 
     extras = manifest.get("extras") or {}
     if extras and not isinstance(extras, dict):
@@ -105,8 +113,9 @@ def _assert_package_filename(filename: str, extra: bool = False) -> None:
         raise ValueError(f"Unsafe package extra filename: {filename}")
 
 
-def _manifest_entry(path: Path) -> dict[str, str | int]:
-    return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
+def _manifest_entry(path: Path, relative_to: Path | None = None) -> dict[str, str | int]:
+    filename = path.relative_to(relative_to).as_posix() if relative_to is not None else path.name
+    return {"file": filename, "sha256": sha256_file(path), "bytes": path.stat().st_size}
 
 
 def _is_regular_file(path: Path) -> bool:
@@ -118,17 +127,27 @@ def _is_package_filename(value: str) -> bool:
     return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
 
 
-def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
+def _is_package_relative_path(value: str) -> bool:
+    if "\\" in value or "%" in value:
+        return False
+    path = PurePosixPath(value)
+    return bool(path.parts) and not path.is_absolute() and all(part not in {"", ".", ".."} for part in path.parts)
+
+
+def _validate_entry(
+    destination: Path, key: str, entry: Any, failures: list[str], nested: bool = False
+) -> Path | None:
     if not isinstance(entry, dict):
         failures.append(f"{key} manifest entry is missing or invalid")
         return None
 
     filename = entry.get("file")
-    if not isinstance(filename, str) or not _is_package_filename(filename):
+    valid_filename = _is_package_relative_path(filename) if nested and isinstance(filename, str) else _is_package_filename(filename)
+    if not valid_filename:
         failures.append(f"{key} file must be a package-relative filename")
         return None
 
-    path = destination / filename
+    path = destination.joinpath(*PurePosixPath(filename).parts)
     if not _is_regular_file(path):
         failures.append(f"{key} file is missing or is not a regular file: {filename}")
         return None
@@ -146,6 +165,34 @@ def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]
         failures.append(f"{key} byte count mismatch: {filename}")
 
     return path
+
+
+def _copy_linked_svg_assets(spec: LabelSpec, report: Report, destination: Path) -> list[dict[str, str | int]]:
+    """Copy raster files validated from local SVG image links, preserving their href paths."""
+
+    if spec.artwork.suffix.lower() != ".svg":
+        return []
+    images = report.metadata.get("svg_embedded_images", [])
+    if not isinstance(images, list):
+        raise TypeError("Validation report has invalid SVG image metadata")
+
+    linked_assets: list[dict[str, str | int]] = []
+    for image in images:
+        if not isinstance(image, dict) or "href" not in image:
+            continue
+        href, expected_hash, expected_bytes = image.get("href"), image.get("sha256"), image.get("bytes")
+        if not isinstance(href, str) or not _is_package_relative_path(href):
+            raise ValueError(f"Validation report has unsafe linked SVG asset path: {href!r}")
+        source = spec.artwork.parent.joinpath(*PurePosixPath(href).parts)
+        if not _is_regular_file(source):
+            raise ValueError(f"Validated linked SVG asset is missing or unsafe: {href}")
+        if sha256_file(source) != expected_hash or source.stat().st_size != expected_bytes:
+            raise ValueError(f"Validated linked SVG asset changed after validation: {href}")
+        target = destination.joinpath(*PurePosixPath(href).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        linked_assets.append(_manifest_entry(target, destination))
+    return linked_assets
 
 
 def _validate_report_and_spec(

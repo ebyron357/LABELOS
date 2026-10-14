@@ -442,6 +442,79 @@ def test_qr_expected_value_is_decoded_from_svg(tmp_path):
     assert report.metadata["svg_embedded_images"][0]["dpi"] >= 300
 
 
+def test_linked_svg_raster_is_dpi_checked_and_packaged(tmp_path):
+    """Local linked rasters are checked, copied at their href, and integrity-verified."""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    raster = assets / "product.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/product.png" width="100" height="100"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert report.passed
+    linked = report.metadata["svg_embedded_images"][0]
+    assert linked["href"] == "assets/product.png"
+    assert linked["sha256"] == hashlib.sha256(raster.read_bytes()).hexdigest()
+    manifest = create_package(spec, report, tmp_path / "release")
+    assert (manifest.parent / "assets" / "product.png").read_bytes() == raster.read_bytes()
+    assert verify_package(manifest.parent) == []
+    (manifest.parent / "assets" / "product.png").write_bytes(b"tampered")
+    assert verify_package(manifest.parent) == [
+        "linked asset 1 checksum mismatch: assets/product.png",
+        "linked asset 1 byte count mismatch: assets/product.png",
+    ]
+
+
+def test_linked_svg_raster_change_after_validation_blocks_package(tmp_path):
+    raster = tmp_path / "image.png"
+    Image.new("RGB", (1200, 1200), "black").save(raster)
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm">'
+        '<image href="image.png" width="100mm" height="100mm"/></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+    report = validate(spec)
+    raster.write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="changed after validation"):
+        create_package(spec, report, tmp_path / "release")
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["https://example.test/image.png", "../image.png", "assets%2Fimage.png", "assets\\image.png"],
+)
+def test_unsafe_linked_svg_raster_is_rejected(tmp_path, href):
+    artwork = tmp_path / "label.svg"
+    artwork.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm">'
+        f'<image href="{href}" width="100mm" height="100mm"/></svg>',
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert any(issue.code == "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
 def test_under_resolution_embedded_svg_image_fails(tmp_path):
     image = qrcode.make("https://example.test/low-resolution")
     buffer = BytesIO()
