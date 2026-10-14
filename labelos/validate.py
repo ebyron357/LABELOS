@@ -8,11 +8,12 @@ import struct
 import zlib
 from collections.abc import Callable
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote_to_bytes
 from xml.etree import ElementTree
 
 from .models import LabelSpec, Report
+from .package import sha256_file
 from .preflight import get_preflight_adapter
 
 MM_PER_POINT = 25.4 / 72
@@ -168,6 +169,36 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         raise ValueError(f"invalid data URI: {error}") from error
 
 
+def _svg_linked_raster_path(artwork: Path, href: str) -> tuple[Path, str]:
+    """Resolve a local SVG image link without permitting an escape from the artwork directory."""
+
+    if (
+        not href
+        or href.startswith(("#", "/"))
+        or "://" in href
+        or ":" in href
+        or "\\" in href
+        or "%" in href
+        or "?" in href
+        or "#" in href
+    ):
+        raise ValueError("href must be a plain, relative local path")
+    relative = PurePosixPath(href)
+    if any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("href must not contain empty, dot, or traversal components")
+
+    base = artwork.parent.resolve()
+    candidate = base
+    for part in relative.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise ValueError("href must not traverse a symbolic link")
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(base) or not resolved.is_file():
+        raise ValueError("href must reference a regular file beneath the artwork directory")
+    return resolved, relative.as_posix()
+
+
 def _svg_image_display_mm(
     image: ElementTree.Element, root: ElementTree.Element, width_mm: float, height_mm: float
 ) -> tuple[float, float]:
@@ -237,8 +268,11 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
+            linked_path: Path | None = None
+            linked_href: str | None = None
             if data is None:
-                continue
+                linked_path, linked_href = _svg_linked_raster_path(spec.artwork, href)
+                data = linked_path.read_bytes()
             from PIL import Image
 
             with Image.open(BytesIO(data)) as raster:
@@ -254,6 +288,15 @@ def _validate_svg_embedded_rasters(
                     "pixels": {"width": pixels[0], "height": pixels[1]},
                     "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
                     "dpi": round(effective_dpi, 2),
+                    **(
+                        {
+                            "href": linked_href,
+                            "sha256": sha256_file(linked_path),
+                            "bytes": linked_path.stat().st_size,
+                        }
+                        if linked_path is not None and linked_href is not None
+                        else {}
+                    ),
                 }
             )
             if effective_dpi < spec.min_dpi:
