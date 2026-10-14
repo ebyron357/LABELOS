@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import LabelSpec, Report
+from .validate import svg_linked_assets
 
 _PACKAGE_SCHEMA_VERSION = 1
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -32,28 +33,32 @@ def create_package(
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
+    linked_assets = _copy_svg_linked_assets(spec.artwork, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
     spec_path = destination / "label-spec.json"
     spec_path.write_text(json.dumps(spec_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     extra_manifest: dict[str, Any] = {}
+    for relative, target in linked_assets.items():
+        extra_manifest[str(relative)] = _manifest_entry(target, destination)
     for filename, payload in (extras or {}).items():
         _assert_package_filename(filename, extra=True)
-        target = destination / Path(filename).name
+        target = destination / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(payload, bytes):
             target.write_bytes(payload)
         elif isinstance(payload, str):
             target.write_text(payload, encoding="utf-8")
         else:
             target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        extra_manifest[target.name] = _manifest_entry(target)
+        extra_manifest[filename] = _manifest_entry(target, destination)
     manifest = {
         "schema_version": _PACKAGE_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "artwork": _manifest_entry(artwork_destination),
-        "validation_report": {**_manifest_entry(report_path), "passed": report.passed},
-        "label_spec": _manifest_entry(spec_path),
+        "artwork": _manifest_entry(artwork_destination, destination),
+        "validation_report": {**_manifest_entry(report_path, destination), "passed": report.passed},
+        "label_spec": _manifest_entry(spec_path, destination),
         "extras": extra_manifest,
         "spec": spec_payload,
     }
@@ -105,8 +110,26 @@ def _assert_package_filename(filename: str, extra: bool = False) -> None:
         raise ValueError(f"Unsafe package extra filename: {filename}")
 
 
-def _manifest_entry(path: Path) -> dict[str, str | int]:
-    return {"file": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
+def _copy_svg_linked_assets(artwork: Path, destination: Path) -> dict[Path, Path]:
+    if artwork.suffix.lower() != ".svg":
+        return {}
+    copied: dict[Path, Path] = {}
+    for _, source, relative in svg_linked_assets(artwork):
+        target = destination / relative
+        if target == destination / artwork.name:
+            raise ValueError(f"Linked image conflicts with artwork filename: {relative}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        copied[relative] = target
+    return copied
+
+
+def _manifest_entry(path: Path, destination: Path) -> dict[str, str | int]:
+    return {
+        "file": str(path.relative_to(destination)),
+        "sha256": sha256_file(path),
+        "bytes": path.stat().st_size,
+    }
 
 
 def _is_regular_file(path: Path) -> bool:
@@ -115,7 +138,7 @@ def _is_regular_file(path: Path) -> bool:
 
 def _is_package_filename(value: str) -> bool:
     path = Path(value)
-    return path.name == value and value not in {"", ".", ".."} and not path.is_absolute()
+    return value not in {"", ".", ".."} and not path.is_absolute() and ".." not in path.parts
 
 
 def _validate_entry(destination: Path, key: str, entry: Any, failures: list[str]) -> Path | None:
