@@ -89,6 +89,26 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
+Verified on 2026-10-14 from the production-readiness branch:
+
+```text
+python3 -m pytest -q                         # 65 passed; 1 upstream FastAPI/Starlette deprecation warning
+python3 -m ruff check .                      # passed
+python3 -m compileall -q labelos illustrator_bridge tests # passed
+python3 -m pip check                         # passed
+python3 -m build                             # sdist and wheel built
+python3 -m labelos doctor --json             # passed; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json # PASS
+python3 -m labelos validate examples/failing-label.json --json # expected failure
+python3 -m labelos package examples/label.json /tmp/labelos-release-final --json # PASS
+python3 -m labelos verify-package /tmp/labelos-release-final --json # PASS
+```
+
+Linked SVG rasters are released only when their plain relative local paths are
+safe (no encoded, traversal, remote, fragment, or backslash paths). They are DPI
+checked, checksum-bound before packaging, included at their original relative
+paths, and integrity-verified in the package manifest.
+
 Verified on 2026-10-05 from the production-readiness branch:
 
 ```text

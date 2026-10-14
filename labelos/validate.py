@@ -173,7 +173,15 @@ def _svg_linked_raster_data(artwork: Path, href: str) -> tuple[bytes, str]:
     """Load a safe local raster reference and return its bytes and normalized relative path."""
 
     parsed = urlsplit(href)
-    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment or not parsed.path:
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path
+        or "%" in parsed.path
+        or "\\" in parsed.path
+    ):
         raise ValueError("linked image href must be a plain relative local path")
     source = Path(parsed.path)
     if source.is_absolute() or ".." in source.parts:
