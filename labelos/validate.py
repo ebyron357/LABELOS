@@ -141,7 +141,59 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
     else:
         _validate_physical_size(spec, width, height, report)
         _validate_svg_embedded_rasters(spec, report, root, width, height)
-    return text
+    return _svg_visible_text(root)
+
+
+def _svg_visible_text(root: ElementTree.Element) -> str:
+    """Return literal content of visible SVG text objects, excluding XML metadata.
+
+    Raw XML search lets a required claim in comments, metadata, or an attribute
+    satisfy validation even when the claim is absent from the label artwork.
+    This remains intentionally text-based: outlined and raster-only copy still
+    requires an OCR-capable workflow.
+    """
+
+    values: list[str] = []
+
+    def visit(element: ElementTree.Element, ancestor_is_hidden: bool = False) -> None:
+        is_hidden = ancestor_is_hidden or _svg_element_is_hidden(element)
+        if _local_name(element.tag) == "text" and not is_hidden:
+            value = "".join(element.itertext())
+            if value:
+                values.append(value)
+            return
+        for child in element:
+            visit(child, is_hidden)
+
+    visit(root)
+    return "\n".join(values)
+
+
+def _svg_element_is_hidden(element: ElementTree.Element) -> bool:
+    """Recognize common SVG declarations that make an element non-rendered."""
+
+    style = element.get("style", "").lower()
+    visibility = element.get("visibility", "").lower()
+    display = element.get("display", "").lower()
+    style_opacity = re.search(r"(?:^|;)\s*opacity\s*:\s*([^;]+)", style)
+    return (
+        display == "none"
+        or visibility in {"hidden", "collapse"}
+        or re.search(r"(?:^|;)\s*display\s*:\s*none(?:;|$)", style) is not None
+        or re.search(r"(?:^|;)\s*visibility\s*:\s*(?:hidden|collapse)(?:;|$)", style) is not None
+        or _svg_opacity_is_zero(element.get("opacity"))
+        or (style_opacity is not None and _svg_opacity_is_zero(style_opacity.group(1)))
+    )
+
+
+def _svg_opacity_is_zero(value: str | None) -> bool:
+    if value is None:
+        return False
+    try:
+        number = float(value.strip().removesuffix("%"))
+    except ValueError:
+        return False
+    return number == 0
 
 
 def _svg_length_mm(value: str | None) -> float | None:

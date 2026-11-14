@@ -20,7 +20,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
 | Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
-| Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
+| Required-copy validation | **AVAILABLE NOW** (visible SVG text / extracted PDF text; does not OCR outlined or raster-only copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
 | Validation reports | **AVAILABLE NOW** |
@@ -56,7 +56,7 @@ labelos verify-package storage/demo-release
 ## Known real blockers
 
 1. **Callas / pdfToolbox is unavailable.** LABELOS will not claim commercial preflight PASS.
-2. **Required copy is text-extraction based.** Outlined type and rasterized copy are not found.
+2. **Required copy is text-extraction based.** LABELOS rejects SVG comments, metadata, and hidden text as copy; outlined type and rasterized copy are not found.
 3. **Safe-area uses rendered occupancy against white.** Full-bleed colored backgrounds can
    be reported as safe-area violations; keep live matter inside the inset.
 4. **No approved printer profile is loaded.** Do not invent printer-specific limits.
@@ -89,7 +89,9 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-10-14 from the current mainline worktree:
+Last full verification is recorded below. It covers visible SVG required-copy checks,
+linked local SVG raster DPI checks, and release-package integrity; this run will update
+the command results and commit SHA after its final verification.
 
 ```text
 python3 -m pytest -q                     # 62 passed (one upstream FastAPI/Starlette deprecation warning)
