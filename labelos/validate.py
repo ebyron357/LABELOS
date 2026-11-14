@@ -176,6 +176,18 @@ def _svg_element_is_hidden(element: ElementTree.Element) -> bool:
     visibility = element.get("visibility", "").lower()
     display = element.get("display", "").lower()
     style_opacity = re.search(r"(?:^|;)\s*opacity\s*:\s*([^;]+)", style)
+    style_fill = re.search(r"(?:^|;)\s*fill\s*:\s*([^;]+)", style)
+    style_fill_opacity = re.search(r"(?:^|;)\s*fill-opacity\s*:\s*([^;]+)", style)
+    style_stroke = re.search(r"(?:^|;)\s*stroke\s*:\s*([^;]+)", style)
+    style_stroke_opacity = re.search(r"(?:^|;)\s*stroke-opacity\s*:\s*([^;]+)", style)
+    fill = (style_fill.group(1) if style_fill else element.get("fill", "")).strip().lower()
+    stroke = (style_stroke.group(1) if style_stroke else element.get("stroke", "")).strip().lower()
+    fill_opacity = style_fill_opacity.group(1) if style_fill_opacity else element.get("fill-opacity")
+    stroke_opacity = (
+        style_stroke_opacity.group(1) if style_stroke_opacity else element.get("stroke-opacity")
+    )
+    no_fill = fill == "none" or _svg_opacity_is_zero(fill_opacity)
+    no_stroke = stroke in {"", "none"} or _svg_opacity_is_zero(stroke_opacity)
     return (
         display == "none"
         or visibility in {"hidden", "collapse"}
@@ -183,6 +195,7 @@ def _svg_element_is_hidden(element: ElementTree.Element) -> bool:
         or re.search(r"(?:^|;)\s*visibility\s*:\s*(?:hidden|collapse)(?:;|$)", style) is not None
         or _svg_opacity_is_zero(element.get("opacity"))
         or (style_opacity is not None and _svg_opacity_is_zero(style_opacity.group(1)))
+        or (no_fill and no_stroke)
     )
 
 

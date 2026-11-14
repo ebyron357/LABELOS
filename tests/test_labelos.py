@@ -63,6 +63,8 @@ def test_missing_copy_fails():
         '<text display="none">REQUIRED CLAIM</text>',
         '<g style="visibility: hidden"><text>REQUIRED CLAIM</text></g>',
         '<text style="opacity: 0.0">REQUIRED CLAIM</text>',
+        '<text fill-opacity="0">REQUIRED CLAIM</text>',
+        '<text style="fill: none; stroke: none">REQUIRED CLAIM</text>',
     ],
 )
 def test_svg_non_rendered_or_metadata_copy_cannot_satisfy_requirement(tmp_path, decoy):
@@ -543,6 +545,29 @@ def test_linked_svg_raster_is_dpi_checked_and_packaged(tmp_path):
     assert manifest["linked_assets"]["assets/product.png"]["file"] == "assets/product.png"
     assert (manifest_path.parent / "assets" / "product.png").is_file()
     assert verify_package(manifest_path.parent) == []
+
+
+def test_package_rejects_linked_raster_collision_before_writing_destination(tmp_path):
+    linked = tmp_path / "validation-report.json"
+    Image.new("RGB", (600, 600), "white").save(linked, format="PNG")
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="validation-report.json" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+    report = validate(spec)
+    destination = tmp_path / "release"
+
+    assert report.passed
+    with pytest.raises(ValueError, match="Linked SVG raster conflicts"):
+        create_package(spec, report, destination)
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize("href", ["../escape.png", "https://example.test/image.png", "assets%2Fimage.png"])
