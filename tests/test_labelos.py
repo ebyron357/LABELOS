@@ -55,6 +55,37 @@ def test_missing_copy_fails():
     assert report.issues[0].code == "REQUIRED_COPY_MISSING"
 
 
+@pytest.mark.parametrize(
+    "claim_markup",
+    [
+        "<metadata>CERTIFIED ORGANIC</metadata>",
+        '<text fill="none">CERTIFIED ORGANIC</text>',
+        '<text opacity="0">CERTIFIED ORGANIC</text>',
+        '<text style="display: none">CERTIFIED ORGANIC</text>',
+    ],
+)
+def test_svg_required_copy_must_be_visible_text(tmp_path, claim_markup):
+    artwork = tmp_path / "copy-decoy.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm">'
+            f"{claim_markup}</svg>"
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "required_copy": ["CERTIFIED ORGANIC"],
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "REQUIRED_COPY_MISSING" for issue in validate(spec).issues)
+
+
 def test_dimension_mismatch_fails():
     spec = LabelSpec.from_dict(
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT

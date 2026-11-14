@@ -142,7 +142,64 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
     else:
         _validate_physical_size(spec, width, height, report)
         _validate_svg_embedded_rasters(spec, report, root, width, height)
-    return text
+    return _svg_visible_text(root)
+
+
+def _svg_visible_text(root: ElementTree.Element) -> str:
+    """Return literal, visibly rendered SVG text rather than raw XML source."""
+
+    values: list[str] = []
+
+    def visit(element: ElementTree.Element, ancestor_is_hidden: bool = False) -> None:
+        is_hidden = ancestor_is_hidden or _svg_container_is_hidden(element)
+        if _local_name(element.tag) == "text":
+            if not is_hidden and _svg_text_is_visible(element):
+                value = "".join(element.itertext())
+                if value:
+                    values.append(value)
+            return
+        for child in element:
+            visit(child, is_hidden)
+
+    visit(root)
+    return "\n".join(values)
+
+
+def _svg_style_value(element: ElementTree.Element, name: str) -> str | None:
+    style = element.get("style", "")
+    match = re.search(rf"(?:^|;)\s*{re.escape(name)}\s*:\s*([^;]+)", style, re.IGNORECASE)
+    return match.group(1).strip() if match else element.get(name)
+
+
+def _svg_opacity_is_zero(value: str | None) -> bool:
+    if value is None:
+        return False
+    try:
+        return float(value.strip().removesuffix("%")) == 0
+    except ValueError:
+        return False
+
+
+def _svg_container_is_hidden(element: ElementTree.Element) -> bool:
+    return (
+        (_svg_style_value(element, "display") or "").lower() == "none"
+        or (_svg_style_value(element, "visibility") or "").lower() in {"hidden", "collapse"}
+        or _svg_opacity_is_zero(_svg_style_value(element, "opacity"))
+    )
+
+
+def _svg_text_is_visible(element: ElementTree.Element) -> bool:
+    if _svg_container_is_hidden(element):
+        return False
+    fill = (_svg_style_value(element, "fill") or "black").lower()
+    stroke = (_svg_style_value(element, "stroke") or "none").lower()
+    fill_is_visible = fill != "none" and not _svg_opacity_is_zero(
+        _svg_style_value(element, "fill-opacity")
+    )
+    stroke_is_visible = stroke != "none" and not _svg_opacity_is_zero(
+        _svg_style_value(element, "stroke-opacity")
+    )
+    return fill_is_visible or stroke_is_visible
 
 
 def _svg_length_mm(value: str | None) -> float | None:
