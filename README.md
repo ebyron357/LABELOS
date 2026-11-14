@@ -116,6 +116,10 @@ files. Linked rasters receive the same effective-DPI check and are copied into t
 release package at their original relative path. Remote URLs, fragments, queries,
 encoded paths, traversal, and symbolic links are rejected.
 
+Required SVG copy must be present in a visible `<text>` element. Metadata, hidden text,
+transparent text, and text with neither fill nor stroke do not satisfy a required-copy
+claim. Outlined or raster-only copy still requires an OCR-capable workflow.
+
 ## Documentation
 
 | Topic | Doc |

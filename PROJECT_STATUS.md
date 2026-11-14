@@ -20,7 +20,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
 | Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
-| Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
+| Required-copy validation | **AVAILABLE NOW** (visible SVG/PDF text search; does not OCR outlined/outlined-to-curves copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
 | Validation reports | **AVAILABLE NOW** |
@@ -92,7 +92,7 @@ optional API/bridge lineage; it is not the operator-facing product.
 Verified on 2026-11-14 from the current mainline worktree:
 
 ```text
-python3 -m pytest -q                     # 64 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m pytest -q                     # 68 passed (one upstream FastAPI/Starlette deprecation warning)
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests
 python3 -m pip check                     # passed
