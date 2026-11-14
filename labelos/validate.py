@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 import struct
 import zlib
@@ -141,7 +142,64 @@ def _validate_svg(spec: LabelSpec, report: Report) -> str:
     else:
         _validate_physical_size(spec, width, height, report)
         _validate_svg_embedded_rasters(spec, report, root, width, height)
-    return text
+    return _svg_visible_text(root)
+
+
+def _svg_visible_text(root: ElementTree.Element) -> str:
+    """Return literal, visibly rendered SVG text rather than raw XML source."""
+
+    values: list[str] = []
+
+    def visit(element: ElementTree.Element, ancestor_is_hidden: bool = False) -> None:
+        is_hidden = ancestor_is_hidden or _svg_container_is_hidden(element)
+        if _local_name(element.tag) == "text":
+            if not is_hidden and _svg_text_is_visible(element):
+                value = "".join(element.itertext())
+                if value:
+                    values.append(value)
+            return
+        for child in element:
+            visit(child, is_hidden)
+
+    visit(root)
+    return "\n".join(values)
+
+
+def _svg_style_value(element: ElementTree.Element, name: str) -> str | None:
+    style = element.get("style", "")
+    match = re.search(rf"(?:^|;)\s*{re.escape(name)}\s*:\s*([^;]+)", style, re.IGNORECASE)
+    return match.group(1).strip() if match else element.get(name)
+
+
+def _svg_opacity_is_zero(value: str | None) -> bool:
+    if value is None:
+        return False
+    try:
+        return float(value.strip().removesuffix("%")) == 0
+    except ValueError:
+        return False
+
+
+def _svg_container_is_hidden(element: ElementTree.Element) -> bool:
+    return (
+        (_svg_style_value(element, "display") or "").lower() == "none"
+        or (_svg_style_value(element, "visibility") or "").lower() in {"hidden", "collapse"}
+        or _svg_opacity_is_zero(_svg_style_value(element, "opacity"))
+    )
+
+
+def _svg_text_is_visible(element: ElementTree.Element) -> bool:
+    if _svg_container_is_hidden(element):
+        return False
+    fill = (_svg_style_value(element, "fill") or "black").lower()
+    stroke = (_svg_style_value(element, "stroke") or "none").lower()
+    fill_is_visible = fill != "none" and not _svg_opacity_is_zero(
+        _svg_style_value(element, "fill-opacity")
+    )
+    stroke_is_visible = stroke != "none" and not _svg_opacity_is_zero(
+        _svg_style_value(element, "stroke-opacity")
+    )
+    return fill_is_visible or stroke_is_visible
 
 
 def _svg_length_mm(value: str | None) -> float | None:
@@ -166,6 +224,36 @@ def _svg_embedded_raster_data(href: str) -> bytes | None:
         return unquote_to_bytes(payload)
     except (ValueError, base64.binascii.Error) as error:
         raise ValueError(f"invalid data URI: {error}") from error
+
+
+def _svg_linked_raster_path(artwork: Path, href: str) -> tuple[Path, str]:
+    """Return a safe local SVG raster target and its normalized package path."""
+
+    if (
+        not href
+        or href.startswith(("/", "\\", "#"))
+        or "\\" in href
+        or any(marker in href for marker in ("?", "#", "%"))
+        or re.match(r"^[a-z][a-z0-9+.-]*:", href, re.IGNORECASE)
+    ):
+        raise ValueError("href must be a plain relative local path")
+    path = Path(href)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("href must be a plain relative local path")
+    root = artwork.parent.resolve()
+    candidate = artwork.parent.joinpath(*path.parts)
+    try:
+        candidate.resolve().relative_to(root)
+    except ValueError as error:
+        raise ValueError("href resolves outside the SVG directory") from error
+    current = artwork.parent
+    for part in path.parts:
+        current /= part
+        if current.is_symlink():
+            raise ValueError("href must not traverse a symbolic link")
+    if not candidate.is_file():
+        raise ValueError("linked raster file does not exist")
+    return candidate, Path(*path.parts).as_posix()
 
 
 def _svg_image_display_mm(
@@ -237,11 +325,23 @@ def _validate_svg_embedded_rasters(
             continue
         try:
             data = _svg_embedded_raster_data(href)
-            if data is None:
-                continue
             from PIL import Image
 
-            with Image.open(BytesIO(data)) as raster:
+            source: dict[str, str] = {"kind": "embedded"}
+            if data is None:
+                linked_path, package_path = _svg_linked_raster_path(spec.artwork, href)
+                source = {
+                    "kind": "linked",
+                    "href": package_path,
+                    "sha256": hashlib.sha256(linked_path.read_bytes()).hexdigest(),
+                }
+                raster_source = linked_path
+            else:
+                raster_source = BytesIO(data)
+            with Image.open(raster_source) as raster:
+                if raster.format == "SVG":
+                    raise ValueError("linked image must be a raster format")
+                raster.load()
                 pixels = raster.size
             display_width, display_height = _svg_image_display_mm(image, root, width_mm, height_mm)
             effective_dpi = min(
@@ -254,6 +354,7 @@ def _validate_svg_embedded_rasters(
                     "pixels": {"width": pixels[0], "height": pixels[1]},
                     "display_mm": {"width": round(display_width, 3), "height": round(display_height, 3)},
                     "dpi": round(effective_dpi, 2),
+                    **source,
                 }
             )
             if effective_dpi < spec.min_dpi:

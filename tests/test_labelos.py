@@ -1,6 +1,8 @@
 import hashlib
 import json
 import struct
+import subprocess
+import sys
 import zlib
 from base64 import b64encode
 from io import BytesIO
@@ -51,6 +53,37 @@ def test_missing_copy_fails():
     report = validate(spec)
     assert not report.passed
     assert report.issues[0].code == "REQUIRED_COPY_MISSING"
+
+
+@pytest.mark.parametrize(
+    "claim_markup",
+    [
+        "<metadata>CERTIFIED ORGANIC</metadata>",
+        '<text fill="none">CERTIFIED ORGANIC</text>',
+        '<text opacity="0">CERTIFIED ORGANIC</text>',
+        '<text style="display: none">CERTIFIED ORGANIC</text>',
+    ],
+)
+def test_svg_required_copy_must_be_visible_text(tmp_path, claim_markup):
+    artwork = tmp_path / "copy-decoy.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm">'
+            f"{claim_markup}</svg>"
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "required_copy": ["CERTIFIED ORGANIC"],
+        },
+        tmp_path,
+    )
+
+    assert any(issue.code == "REQUIRED_COPY_MISSING" for issue in validate(spec).issues)
 
 
 def test_dimension_mismatch_fails():
@@ -369,6 +402,16 @@ def test_cli_doctor_reports_callas_unavailable(capsys):
     assert result["tools"]["Callas pdfToolbox"]["status"] == "SKIPPED_NOT_CONFIGURED"
 
 
+def test_module_cli_doctor():
+    result = subprocess.run(
+        [sys.executable, "-m", "labelos", "doctor", "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(result.stdout)["passed"] is True
+
+
 def test_qr_expected_value_is_decoded(tmp_path):
     image = qrcode.make("https://example.test/sku/42")
     artwork = tmp_path / "qr.png"
@@ -465,6 +508,122 @@ def test_under_resolution_embedded_svg_image_fails(tmp_path):
     assert not report.passed
     assert report.metadata["svg_embedded_images"][0]["dpi"] < 300
     assert any(issue.code == "SVG_EMBEDDED_IMAGE_DPI_TOO_LOW" for issue in report.issues)
+
+
+def test_linked_svg_raster_is_dpi_checked_and_packaged(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    Image.new("RGB", (600, 600), "white").save(assets / "product.png")
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="assets/product.png" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+
+    report = validate(spec)
+    assert report.passed
+    image = report.metadata["svg_embedded_images"][0]
+    assert image["kind"] == "linked"
+    assert image["href"] == "assets/product.png"
+    assert image["dpi"] >= 300
+
+    manifest_path = create_package(spec, report, tmp_path / "release")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["linked_assets"]["assets/product.png"]["file"] == "assets/product.png"
+    assert (manifest_path.parent / "assets" / "product.png").is_file()
+    assert verify_package(manifest_path.parent) == []
+
+
+def test_linked_svg_raster_change_after_validation_blocks_package(tmp_path):
+    asset = tmp_path / "product.png"
+    Image.new("RGB", (600, 600), "white").save(asset)
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="product.png" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+    report = validate(spec)
+    asset.write_bytes(b"changed after validation")
+
+    with pytest.raises(ValueError, match="changed after validation"):
+        create_package(spec, report, tmp_path / "release")
+    assert not (tmp_path / "release").exists()
+
+
+def test_linked_svg_raster_cannot_collide_with_package_artifacts(tmp_path):
+    asset = tmp_path / "product-data.json"
+    Image.new("RGB", (600, 600), "white").save(asset, format="PNG")
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="product-data.json" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100, "min_dpi": 300}, tmp_path
+    )
+    report = validate(spec)
+
+    with pytest.raises(ValueError, match="Package artifact paths collide"):
+        create_package(spec, report, tmp_path / "release", extras={"product-data.json": {}})
+    assert not (tmp_path / "release").exists()
+
+
+@pytest.mark.parametrize("href", ["../escape.png", "https://example.test/image.png", "assets%2Fimage.png"])
+def test_unsafe_linked_svg_raster_fails_closed(tmp_path, href):
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            f'viewBox="0 0 100 100"><image href="{href}" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100}, tmp_path
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED" for issue in report.issues)
+
+
+def test_symlinked_svg_raster_fails_closed(tmp_path):
+    target = tmp_path / "target.png"
+    Image.new("RGB", (600, 600), "white").save(target)
+    linked = tmp_path / "linked.png"
+    try:
+        linked.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+    artwork = tmp_path / "linked.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" '
+            'viewBox="0 0 100 100"><image href="linked.png" width="10" height="10"/></svg>'
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {"artwork": artwork.name, "width_mm": 100, "height_mm": 100}, tmp_path
+    )
+
+    assert any(issue.code == "SVG_EMBEDDED_IMAGE_INSPECTION_FAILED" for issue in validate(spec).issues)
 
 
 def test_barcode_expected_value_is_decoded_from_pdf(tmp_path):
