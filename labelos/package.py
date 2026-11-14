@@ -29,10 +29,14 @@ def create_package(
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError(f"Package destination already exists: {destination}")
+    linked_asset_sources = _linked_svg_asset_sources(spec, report)
+    _assert_no_package_path_collisions(
+        spec.artwork.name, linked_asset_sources, (extras or {}).keys()
+    )
     destination.mkdir(parents=True)
     artwork_destination = destination / spec.artwork.name
     shutil.copy2(spec.artwork, artwork_destination)
-    linked_assets = _copy_linked_svg_assets(spec, report, destination)
+    linked_assets = _copy_linked_svg_assets(linked_asset_sources, destination)
     report_path = destination / "validation-report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     spec_payload = spec.to_dict(artwork=artwork_destination.name)
@@ -134,13 +138,12 @@ def _is_package_filename(value: str) -> bool:
     )
 
 
-def _copy_linked_svg_assets(spec: LabelSpec, report: Report, destination: Path) -> dict[str, Any]:
-    """Copy local SVG raster dependencies under their referenced relative paths."""
-
+def _linked_svg_asset_sources(spec: LabelSpec, report: Report) -> dict[str, Path]:
+    """Recheck validated SVG raster dependencies before creating a release package."""
     images = report.metadata.get("svg_embedded_images", [])
     if not isinstance(images, list):
         return {}
-    linked_assets: dict[str, Any] = {}
+    sources: dict[str, Path] = {}
     for image in images:
         if not isinstance(image, dict) or image.get("kind") != "linked":
             continue
@@ -150,6 +153,30 @@ def _copy_linked_svg_assets(spec: LabelSpec, report: Report, destination: Path) 
         source = spec.artwork.parent / Path(href)
         if not _is_regular_file(source):
             raise ValueError(f"Validated SVG linked raster is missing or unsafe: {href}")
+        validated_digest = image.get("sha256")
+        if not isinstance(validated_digest, str) or validated_digest != sha256_file(source):
+            raise ValueError(f"Validated SVG linked raster changed after validation: {href}")
+        sources[href] = source
+    return sources
+
+
+def _assert_no_package_path_collisions(
+    artwork_name: str, linked_asset_sources: dict[str, Path], extra_filenames
+) -> None:
+    occupied = {artwork_name, *_RESERVED_FILENAMES}
+    occupied.update(Path(name).name for name in extra_filenames)
+    collisions = sorted(path for path in linked_asset_sources if path in occupied)
+    if collisions:
+        raise ValueError(f"Package artifact paths collide: {', '.join(collisions)}")
+
+
+def _copy_linked_svg_assets(
+    linked_asset_sources: dict[str, Path], destination: Path
+) -> dict[str, Any]:
+    """Copy rechecked SVG raster dependencies under their referenced relative paths."""
+
+    linked_assets: dict[str, Any] = {}
+    for href, source in linked_asset_sources.items():
         target = destination / Path(href)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 import struct
 import zlib
@@ -272,7 +273,11 @@ def _validate_svg_embedded_rasters(
             source: dict[str, str] = {"kind": "embedded"}
             if data is None:
                 linked_path, package_path = _svg_linked_raster_path(spec.artwork, href)
-                source = {"kind": "linked", "href": package_path}
+                source = {
+                    "kind": "linked",
+                    "href": package_path,
+                    "sha256": hashlib.sha256(linked_path.read_bytes()).hexdigest(),
+                }
                 raster_source = linked_path
             else:
                 raster_source = BytesIO(data)
