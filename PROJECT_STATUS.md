@@ -1,6 +1,6 @@
 # Production readiness status
 
-Canonical implementation: branch `stabilize/canonical-validator`.
+Canonical implementation: current mainline worktree.
 
 LABELOS is a command-line validation and release engine. Operators validate SVG/PNG/PDF
 artwork, then create and verify SHA-256 release packages. The HTTP API, Illustrator
@@ -20,7 +20,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
 | Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
-| Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
+| Required-copy validation | **AVAILABLE NOW** (visible SVG text / extracted PDF text; does not OCR outlined or raster-only copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
 | Validation reports | **AVAILABLE NOW** |
@@ -32,7 +32,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Failed-report rejection | **AVAILABLE NOW** |
 | Package verification | **AVAILABLE NOW** |
 | Dependency/environment diagnostics (`doctor`) | **AVAILABLE NOW** |
-| Linked (non-embedded) SVG raster files | **PARTIAL** (data-URI rasters are checked; external `href` files are skipped) |
+| Linked local SVG raster files | **AVAILABLE NOW** (DPI-checked, checksummed, and packaged under their relative `href`; unsafe links are rejected) |
 | Required-copy on outlined text / raster-only type | **PARTIAL** (string must exist in SVG/PDF text extraction) |
 | Color management / ICC / overprint | **FUTURE** |
 | Callas pdfToolbox / commercial prepress profiles | **EXTERNAL DEPENDENCY** — not licensed, not configured, never faked as PASS (`SKIPPED_NOT_CONFIGURED`) |
@@ -56,7 +56,7 @@ labelos verify-package storage/demo-release
 ## Known real blockers
 
 1. **Callas / pdfToolbox is unavailable.** LABELOS will not claim commercial preflight PASS.
-2. **Required copy is text-extraction based.** Outlined type and rasterized copy are not found.
+2. **Required copy is text-extraction based.** LABELOS rejects SVG comments, metadata, and hidden text as copy; outlined type and rasterized copy are not found.
 3. **Safe-area uses rendered occupancy against white.** Full-bleed colored backgrounds can
    be reported as safe-area violations; keep live matter inside the inset.
 4. **No approved printer profile is loaded.** Do not invent printer-specific limits.
@@ -89,20 +89,21 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
+Verified on 2026-11-14 from the current mainline worktree. This covers visible SVG
+required-copy checks (including opacity/fill decoys), linked local SVG raster DPI
+checks, release-package integrity, and pre-write package-artifact collision rejection.
 
 ```text
-python -m pytest -q                      # 52 passed
-python -m ruff check .                   # passed
-python -m compileall -q labelos illustrator_bridge tests
-python -m pip check                      # passed
-python -m build                          # sdist and wheel in dist/
-labelos doctor --json                    # Callas SKIPPED_NOT_CONFIGURED
-labelos validate examples/label.json --json          # PASS
-labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING
-labelos package examples/label.json storage/demo-release
-labelos verify-package storage/demo-release          # PASS
-# after tampering artwork: checksum + byte-count mismatch, FAIL
+python3 -m pytest -q                     # 70 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m ruff check .                  # passed
+python3 -m compileall -q labelos illustrator_bridge tests
+python3 -m pip check                     # passed
+python3 -m build --outdir <artifact-dir>/dist  # sdist and wheel built successfully
+python3 -m labelos doctor --json         # required tools available; Callas SKIPPED_NOT_CONFIGURED
+python3 -m labelos validate examples/label.json --json          # PASS
+python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING / exit 1
+labelos package examples/label.json <artifact-dir>/release --json
+labelos verify-package <artifact-dir>/release --json             # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
