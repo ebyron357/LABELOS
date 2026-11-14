@@ -89,21 +89,21 @@ optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
 
-Last full verification is recorded below. It covers visible SVG required-copy checks,
-linked local SVG raster DPI checks, and release-package integrity; this run will update
-the command results and commit SHA after its final verification.
+Verified on 2026-11-14 from the current mainline worktree. This covers visible SVG
+required-copy checks (including opacity/fill decoys), linked local SVG raster DPI
+checks, release-package integrity, and pre-write package-artifact collision rejection.
 
 ```text
-python3 -m pytest -q                     # 62 passed (one upstream FastAPI/Starlette deprecation warning)
+python3 -m pytest -q                     # 70 passed (one upstream FastAPI/Starlette deprecation warning)
 python3 -m ruff check .                  # passed
 python3 -m compileall -q labelos illustrator_bridge tests
 python3 -m pip check                     # passed
-python3 -m build                         # sdist and wheel in dist/
+python3 -m build --outdir <artifact-dir>/dist  # sdist and wheel built successfully
 python3 -m labelos doctor --json         # required tools available; Callas SKIPPED_NOT_CONFIGURED
 python3 -m labelos validate examples/label.json --json          # PASS
 python3 -m labelos validate examples/failing-label.json --json  # REQUIRED_COPY_MISSING / exit 1
-python3 -m labelos package examples/label.json /tmp/release --json
-python3 -m labelos verify-package /tmp/release --json           # PASS
+labelos package examples/label.json <artifact-dir>/release --json
+labelos verify-package <artifact-dir>/release --json             # PASS
 ```
 
 Callas pdfToolbox remains unavailable and is never reported as PASS.
