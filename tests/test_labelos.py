@@ -53,6 +53,42 @@ def test_missing_copy_fails():
     assert report.issues[0].code == "REQUIRED_COPY_MISSING"
 
 
+@pytest.mark.parametrize(
+    "decoy",
+    [
+        "<!-- REQUIRED CLAIM -->",
+        "<metadata>REQUIRED CLAIM</metadata>",
+        '<text display="none">REQUIRED CLAIM</text>',
+        '<g style="visibility: hidden"><text>REQUIRED CLAIM</text></g>',
+        '<text style="opacity: 0.0">REQUIRED CLAIM</text>',
+    ],
+)
+def test_svg_non_rendered_or_metadata_copy_cannot_satisfy_requirement(tmp_path, decoy):
+    artwork = tmp_path / "copy-decoy.svg"
+    artwork.write_text(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="106mm" height="56mm">'
+            f"{decoy}<text x=\"10\" y=\"10\">Actual label copy</text></svg>"
+        ),
+        encoding="utf-8",
+    )
+    spec = LabelSpec.from_dict(
+        {
+            "artwork": artwork.name,
+            "width_mm": 100,
+            "height_mm": 50,
+            "bleed_mm": 3,
+            "required_copy": ["REQUIRED CLAIM"],
+        },
+        tmp_path,
+    )
+
+    report = validate(spec)
+
+    assert not report.passed
+    assert any(issue.code == "REQUIRED_COPY_MISSING" for issue in report.issues)
+
+
 def test_dimension_mismatch_fails():
     spec = LabelSpec.from_dict(
         {"artwork": "fixtures/passing-label.svg", "width_mm": 100, "height_mm": 50}, ROOT
