@@ -20,7 +20,7 @@ they are **not** required to use LABELOS on production artwork today.
 | Safe-area enforcement | **AVAILABLE NOW** (visible non-white content vs trim + safe inset) |
 | Minimum DPI (PNG effective resolution) | **AVAILABLE NOW** |
 | Effective DPI for placed raster assets | **AVAILABLE NOW** (SVG data-URI images and PDF placed images) |
-| Required-copy validation | **AVAILABLE NOW** (source-text search; does not OCR outlined/outlined-to-curves copy) |
+| Required-copy validation | **AVAILABLE NOW** (visible SVG text / extracted PDF text; does not OCR outlined or raster-only copy) |
 | QR decoding and expected-value validation | **AVAILABLE NOW** (ZXing-C++; SVG/PDF rasterized at 300 DPI) |
 | Barcode decoding and expected-value validation | **AVAILABLE NOW** (includes UPC-A / EAN-13 leading-zero matching) |
 | Validation reports | **AVAILABLE NOW** |
@@ -56,7 +56,7 @@ labelos verify-package storage/demo-release
 ## Known real blockers
 
 1. **Callas / pdfToolbox is unavailable.** LABELOS will not claim commercial preflight PASS.
-2. **Required copy is text-extraction based.** Outlined type and rasterized copy are not found.
+2. **Required copy is text-extraction based.** LABELOS rejects SVG comments, metadata, and hidden text as copy; outlined type and rasterized copy are not found.
 3. **Safe-area uses rendered occupancy against white.** Full-bleed colored backgrounds can
    be reported as safe-area violations; keep live matter inside the inset.
 4. **No approved printer profile is loaded.** Do not invent printer-specific limits.
@@ -88,6 +88,27 @@ Keep `main` (#6 and earlier) as history. `feat/production-label-automation` rema
 optional API/bridge lineage; it is not the operator-facing product.
 
 ## Verification record
+
+Verified on 2026-11-14 from `cursor/label-system-readiness-2cef`:
+
+```text
+python3 -m pytest -q                 # 61 passed; one upstream FastAPI/Starlette deprecation warning
+python3 -m ruff check .              # passed
+python3 -m compileall -q labelos illustrator_bridge tests  # passed
+python3 -m pip check                 # passed
+python3 -m build                     # sdist and wheel built successfully
+labelos doctor --json                # required readers available; Callas SKIPPED_NOT_CONFIGURED
+labelos validate examples/label.json --json          # PASS
+labelos validate examples/failing-label.json --json  # expected FAIL: REQUIRED_COPY_MISSING
+labelos package examples/label.json /tmp/release --json
+labelos verify-package /tmp/release --json           # PASS
+```
+
+SVG required-copy validation now reads literal, visible `<text>` content rather than
+raw XML, so comments, metadata, and hidden text cannot satisfy a required claim.
+The next actionable production capability is already implemented and CI-green in
+open PR #217: safely validate and package linked local SVG rasters. It requires review
+and merge; do not duplicate it from this branch.
 
 Verified on 2026-08-18 from branch `stabilize/canonical-validator`:
 

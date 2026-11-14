@@ -100,7 +100,7 @@ byte-count mismatches, and reports that do not record a pass.
 | `SVG_EMBEDDED_IMAGE_DPI_TOO_LOW` | Placed SVG raster is below `min_dpi` |
 | `PDF_IMAGE_DPI_TOO_LOW` | Placed PDF raster is below `min_dpi` |
 | `SAFE_AREA_VIOLATION` | Visible content extends outside trim + safe inset |
-| `REQUIRED_COPY_MISSING` | A required string was not found in the artwork |
+| `REQUIRED_COPY_MISSING` | A required string was not found in visible SVG text or extracted PDF text |
 | `CODE_VALUE_MISMATCH` | QR/barcode did not decode to the expected value |
 | `DECODER_UNAVAILABLE` | Pillow or zxing-cpp is missing while a code was requested |
 
